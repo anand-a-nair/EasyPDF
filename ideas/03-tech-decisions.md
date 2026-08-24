@@ -126,6 +126,13 @@ parse, build complexity) outweighs its benefit.
 deliberately — this is the decision here most likely to be wrong, and reversing
 it is cheap compared to the others.
 
+**Partly wrong, corrected 2026-08-25.** "No framework" holds. "No bundler" did
+not: `tsc` emits import statements verbatim, so the bundle contained bare
+specifiers (`@tauri-apps/api/core`) that no webview can resolve. The script
+failed to load and the entire UI silently did nothing. esbuild is now a
+build-time dependency — it ships nothing, output is 10.3 KB, and the build takes
+milliseconds. See D-021.
+
 ---
 
 ## TD-007 — Vendor a prebuilt PDFium (provisional)

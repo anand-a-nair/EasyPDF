@@ -5,7 +5,7 @@
 
 # Node / frontend
 node_modules/
-dist/
+/apps/desktop/dist/
 .vite/
 *.tsbuildinfo
 

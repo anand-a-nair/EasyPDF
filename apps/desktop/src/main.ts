@@ -13,6 +13,11 @@ interface DocumentInfo {
   readonly encrypted: boolean;
 }
 
+interface PageDimensions {
+  readonly width: number;
+  readonly height: number;
+}
+
 interface WorkerStatus {
   readonly running: boolean;
   readonly sandboxed: boolean;
@@ -177,16 +182,38 @@ function stepZoom(direction: 1 | -1): Promise<void> {
   return setZoom(next ?? current);
 }
 
-/** Scales the page so its full height fits the viewport. */
+/** Padding around the page inside the viewport, in CSS pixels. */
+const VIEWPORT_PADDING = 64;
+
+/**
+ * Scales the page so the whole of it fits the viewport.
+ *
+ * Fits both axes, not just height: a landscape page fitted only by height
+ * overflows sideways. Asks the worker for the page size rather than rendering
+ * a page just to measure it and throw the pixels away.
+ */
 async function zoomToFit(): Promise<void> {
   if (state.document === null) return;
 
-  // Measure at a known zoom, then solve for the scale that fits.
-  const probe = await invoke<ArrayBuffer>("render_page", { page: state.page, zoom: 1 });
-  const image = decodePage(probe);
+  const available = {
+    width: viewport.clientWidth - VIEWPORT_PADDING,
+    height: viewport.clientHeight - VIEWPORT_PADDING,
+  };
 
-  const available = viewport.clientHeight - 64; // padding
-  await setZoom(Math.max(0.1, Math.min(available / image.height, 4)));
+  // Before first layout — or in a window too small to be meaningful — fitting
+  // would collapse to the minimum zoom. Keeping the current zoom is the less
+  // surprising outcome.
+  if (available.width < 50 || available.height < 50) return;
+
+  try {
+    const size = await invoke<PageDimensions>("page_size", { page: state.page });
+    if (size.width <= 0 || size.height <= 0) return;
+
+    const scale = Math.min(available.width / size.width, available.height / size.height);
+    await setZoom(Math.max(0.1, Math.min(scale, 8)));
+  } catch (error) {
+    showError(`Could not fit page: ${String(error)}`);
+  }
 }
 
 async function openDocument(): Promise<void> {

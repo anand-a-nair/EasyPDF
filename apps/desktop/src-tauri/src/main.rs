@@ -123,6 +123,24 @@ fn render_page(page: usize, zoom: f32, session: State<'_, Session>) -> Result<Ip
     Ok(IpcResponse::new(rendered.into_wire_format()))
 }
 
+/// A page's dimensions in points, without rendering it.
+///
+/// Lets the frontend compute a fit-to-window zoom without paying for a render
+/// it is going to discard.
+#[tauri::command]
+fn page_size(page: usize, session: State<'_, Session>) -> Result<PageDimensions, String> {
+    let (width, height) = session.page_size(page)?;
+    Ok(PageDimensions { width, height })
+}
+
+/// Page dimensions in points.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PageDimensions {
+    width: f32,
+    height: f32,
+}
+
 /// Closes the open document and frees its cached tiles.
 #[tauri::command]
 fn close_document(session: State<'_, Session>) -> Result<(), String> {
@@ -165,6 +183,7 @@ fn main() {
             worker_status,
             open_document,
             render_page,
+            page_size,
             close_document,
             document_info
         ])

@@ -198,6 +198,31 @@ impl PdfiumRasterizer {
         Ok(Tile { width, height, pixels })
     }
 
+    /// A page's dimensions in points, without rendering it.
+    pub fn page_size(
+        &self,
+        document: &[u8],
+        password: Option<&str>,
+        page: usize,
+    ) -> Result<(f32, f32), RenderError> {
+        let _guard = render_lock();
+
+        let document = self
+            .pdfium
+            .load_pdf_from_byte_slice(document, password)
+            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
+
+        let pages = document.pages();
+        let total = usize::try_from(pages.len()).unwrap_or(0);
+        let index = i32::try_from(page)
+            .map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
+
+        let page_handle =
+            pages.get(index).map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
+
+        Ok((page_handle.width().value, page_handle.height().value))
+    }
+
     /// Number of pages, without rendering anything.
     pub fn page_count(
         &self,

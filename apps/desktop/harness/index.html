@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>EasyPDF frontend harness</title>
+    <!--
+      Exercises the real frontend bundle in a plain browser with Tauri stubbed
+      out. Development tool, never shipped — it lives outside dist/ so it
+      cannot end up in a build.
+
+      This exists because the frontend once shipped completely broken: tsc
+      emitted bare module specifiers ("@tauri-apps/api/core") that no webview
+      can resolve, so the script failed to load and nothing worked at all. No
+      Rust test could have caught it. Loading the real bundle here does.
+
+      Run:  python3 -m http.server 8731 --directory apps/desktop
+      Open: http://localhost:8731/harness/
+    -->
+    <link rel="stylesheet" href="../dist/styles.css" />
+    <script>
+      // Stands in for Tauri so the real frontend bundle can be exercised in a
+      // plain browser. Development harness only — never shipped.
+      window.__harness = { calls: [], errors: [] };
+      window.addEventListener("error", (e) => window.__harness.errors.push(String(e.message)));
+
+      function fakePage(width, height) {
+        const buffer = new ArrayBuffer(8 + width * height * 4);
+        const view = new DataView(buffer);
+        view.setUint32(0, width, true);
+        view.setUint32(4, height, true);
+        const pixels = new Uint8Array(buffer, 8);
+        for (let i = 0; i < pixels.length; i += 4) {
+          const dark = i % 400 < 40;
+          pixels[i] = dark ? 20 : 255;
+          pixels[i + 1] = dark ? 20 : 255;
+          pixels[i + 2] = dark ? 20 : 255;
+          pixels[i + 3] = 255;
+        }
+        return buffer;
+      }
+
+      window.__TAURI_INTERNALS__ = {
+        transformCallback: (cb) => cb,
+        unregisterCallback: () => {},
+        invoke: async (cmd, args) => {
+          window.__harness.calls.push({ cmd, args });
+          switch (cmd) {
+            case "worker_status":
+              return { running: true, sandboxed: true, detail: "confined via seatbelt", memoryCapped: false };
+            case "plugin:dialog|open":
+              return "/fake/example.pdf";
+            case "open_document":
+              return { name: "example.pdf", pageCount: 3, encrypted: false };
+            case "render_page":
+              return fakePage(Math.round(200 * args.zoom), Math.round(100 * args.zoom));
+            case "page_size":
+              return { width: 200, height: 100 };
+            case "close_document":
+              return null;
+            default:
+              throw new Error(`unstubbed command: ${cmd}`);
+          }
+        },
+      };
+    </script>
+  </head>
+  <body>
+    <header id="toolbar">
+      <button id="open" type="button" class="primary">Open…</button>
+      <div class="group" data-requires-document>
+        <button id="prev" type="button">‹</button>
+        <span id="page-indicator">— / —</span>
+        <button id="next" type="button">›</button>
+      </div>
+      <div class="group" data-requires-document>
+        <button id="zoom-out" type="button">−</button>
+        <span id="zoom-indicator">100%</span>
+        <button id="zoom-in" type="button">+</button>
+        <button id="zoom-fit" type="button">Fit</button>
+      </div>
+      <span id="doc-name"></span>
+      <span id="sandbox-badge"></span>
+    </header>
+    <main id="viewport">
+      <div id="empty-state">
+        <h1>EasyPDF</h1>
+        <p>Open a PDF to get started.</p>
+        <button id="open-empty" type="button" class="primary">Open a PDF…</button>
+      </div>
+      <canvas id="page" hidden></canvas>
+    </main>
+    <div id="error" role="alert" hidden></div>
+    <script type="module" src="../dist/main.js"></script>
+  </body>
+</html>

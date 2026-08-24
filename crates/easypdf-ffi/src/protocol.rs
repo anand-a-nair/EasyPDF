@@ -111,6 +111,16 @@ pub enum Request {
         rotation: i32,
     },
 
+    /// Ask for a page's dimensions without rendering it.
+    ///
+    /// Fitting a page to the window needs its size, and rendering a full page
+    /// only to measure it and throw the pixels away is wasteful — especially
+    /// at high zoom, where the discarded bitmap is the expensive part.
+    PageSize {
+        /// Zero-based page index.
+        page: usize,
+    },
+
     /// Extract text for selection and search.
     ExtractText {
         /// Zero-based page index.
@@ -152,6 +162,14 @@ pub enum Response {
         height: u32,
         /// BGRA pixel data.
         pixels: Vec<u8>,
+    },
+
+    /// A page's dimensions in PDF points (1/72 inch), before rotation.
+    PageSize {
+        /// Width in points.
+        width: f32,
+        /// Height in points.
+        height: f32,
     },
 
     /// Extracted text.

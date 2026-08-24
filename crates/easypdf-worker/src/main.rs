@@ -174,6 +174,20 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
             }
         }
 
+        Request::PageSize { page } => {
+            let Some(rasterizer) = session.rasterizer.as_ref() else {
+                return Response::Failed(engine_missing());
+            };
+            let Some(document) = session.document.as_ref() else {
+                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+            };
+
+            match rasterizer.page_size(document, session.password.as_deref(), *page) {
+                Ok((width, height)) => Response::PageSize { width, height },
+                Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
+            }
+        }
+
         Request::ExtractText { .. } => Response::Failed(WorkerError::Unsupported(
             "text extraction is not implemented yet".to_owned(),
         )),

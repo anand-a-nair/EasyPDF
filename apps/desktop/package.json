@@ -6,13 +6,14 @@
   "description": "EasyPDF desktop shell",
   "license": "Apache-2.0",
   "scripts": {
-    "build": "tsc && node scripts/copy-static.mjs",
+    "build": "esbuild src/main.ts --bundle --format=esm --target=es2022 --outfile=dist/main.js && node scripts/copy-static.mjs",
     "dev": "tauri dev",
     "tauri": "tauri",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "esbuild": "^0.28.2",
     "typescript": "^5"
   },
   "dependencies": {

@@ -284,3 +284,45 @@ fn close_document_forgets_the_document() {
         worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 0 }).unwrap();
     assert!(matches!(response, Response::Failed(_)), "{response:?}");
 }
+
+#[test]
+fn page_size_is_reported_without_rendering() {
+    // Fit-to-window needs page dimensions. Rendering a full page only to
+    // measure it and discard the pixels is wasteful, especially at high zoom.
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    match worker.request(&Request::PageSize { page: 0 }).unwrap() {
+        Response::PageSize { width, height } => {
+            assert!((width - 200.0).abs() < 0.5, "width was {width}");
+            assert!((height - 100.0).abs() < 0.5, "height was {height}");
+        }
+        other => panic!("expected PageSize, got {other:?}"),
+    }
+}
+
+#[test]
+fn page_size_reflects_the_document_not_a_default() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("wide.pdf"), password: None }).unwrap();
+
+    match worker.request(&Request::PageSize { page: 0 }).unwrap() {
+        Response::PageSize { width, .. } => assert!((width - 400.0).abs() < 0.5),
+        other => panic!("expected PageSize, got {other:?}"),
+    }
+}
+
+#[test]
+fn page_size_of_a_missing_page_is_refused() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    let response = worker.request(&Request::PageSize { page: 99 }).unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+}

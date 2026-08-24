@@ -136,6 +136,17 @@ impl Session {
         }
     }
 
+    /// A page's size in points, without rendering it.
+    pub(crate) fn page_size(&self, page: usize) -> Result<(f32, f32), String> {
+        let response = self.send(&Request::PageSize { page }).map_err(|error| error.to_string())?;
+
+        match response {
+            Response::PageSize { width, height } => Ok((width, height)),
+            Response::Failed(error) => Err(error.to_string()),
+            other => Err(format!("unexpected response: {other:?}")),
+        }
+    }
+
     /// Closes the document and releases its memory.
     pub(crate) fn close(&self) -> Result<(), String> {
         let _ = self.send(&Request::CloseDocument);
