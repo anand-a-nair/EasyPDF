@@ -5,8 +5,8 @@
   "identifier": "org.easypdf.desktop",
   "build": {
     "frontendDist": "../dist",
-    "beforeDevCommand": "npm run build",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "npm run build && cargo build -p easypdf-worker",
+    "beforeBuildCommand": "npm run build && cargo build -p easypdf-worker --release"
   },
   "app": {
     "windows": [

@@ -1,6 +1,6 @@
 [package]
-name = "easypdf-ffi"
-description = "Protocol for the sandboxed parse and render worker process."
+name = "easypdf-worker"
+description = "Sandboxed process that handles untrusted PDF bytes."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,11 +10,11 @@ authors.workspace = true
 publish.workspace = true
 
 [dependencies]
-thiserror.workspace = true
-serde = { workspace = true }
-serde_json = "1"
-easypdf-core = { workspace = true }
+easypdf-ffi.workspace = true
+easypdf-core.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [lints]
 workspace = true
-

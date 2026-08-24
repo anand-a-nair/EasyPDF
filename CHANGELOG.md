@@ -24,6 +24,14 @@ The canonical version is in [`.version`](.version).
   tile cache), `easypdf-crypto` (encryption policy, permissions, signature
   verification model), `easypdf-ffi` (sandboxed worker protocol and resource
   limits)
+- Sandboxed worker process (`easypdf-worker`) that confines itself before
+  reading any input. On macOS confinement is enforced via seatbelt and verified
+  by denial — the worker cannot read files, write files, or open sockets.
+  Linux and Windows confinement are not yet implemented and are reported as
+  such rather than assumed.
+- Length-prefixed worker protocol with allocation limits validated before use,
+  timeout and death handling, and a restart path that cannot accidentally reuse
+  a dead process
 - Tauri desktop shell with a dependency-free TypeScript frontend
 - CI: three-OS build matrix, formatting, lints, tests, `cargo-deny` license and
   advisory gate, binary size budget, version-consistency check

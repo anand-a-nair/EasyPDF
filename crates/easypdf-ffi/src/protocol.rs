@@ -2,6 +2,82 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Which kernel resource ceilings the worker managed to apply to itself.
+///
+/// Not a boolean, for the same reason [`crate::protocol::Response`] validation
+/// is not: "limits applied" bundles several independent facts, and platforms
+/// differ in which they actually support. Reporting a single `true` when the
+/// memory ceiling silently failed would misrepresent the containment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ResourceLimits {
+    /// Core dumps are disabled.
+    ///
+    /// A crash dump of this process would contain the document, which may be
+    /// confidential.
+    pub core_dumps_disabled: bool,
+
+    /// CPU-seconds after which the kernel terminates the worker.
+    pub cpu_seconds: Option<u64>,
+
+    /// Address-space ceiling in bytes, if the platform supports one.
+    ///
+    /// **`None` on macOS**, which rejects `RLIMIT_AS` and `RLIMIT_DATA` with
+    /// `EINVAL`. There is no kernel-level memory backstop there, so memory
+    /// containment rests entirely on the accounting in [`crate::limits`].
+    pub address_space_bytes: Option<u64>,
+}
+
+impl ResourceLimits {
+    /// Nothing applied.
+    #[must_use]
+    pub fn none() -> Self {
+        Self { core_dumps_disabled: false, cpu_seconds: None, address_space_bytes: None }
+    }
+
+    /// Whether a kernel-enforced memory ceiling is in place.
+    #[must_use]
+    pub fn memory_capped(&self) -> bool {
+        self.address_space_bytes.is_some()
+    }
+}
+
+/// Whether the worker actually confined itself at startup.
+///
+/// Reported in [`Response::Ready`] so the host knows what it is talking to.
+/// Sandboxing that silently fails is worse than none, because the whole
+/// architecture is built on the assumption that it holds — so the worker says
+/// plainly what it managed to apply, and the host surfaces it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum SandboxStatus {
+    /// OS-level confinement is active.
+    Enforced {
+        /// Which mechanism was applied, e.g. "seatbelt".
+        mechanism: String,
+        /// Which kernel resource ceilings were applied alongside it.
+        resource_limits: ResourceLimits,
+    },
+
+    /// Not confined, with the reason.
+    ///
+    /// **This is not a normal operating state.** It means the process handling
+    /// untrusted input has ordinary user privileges.
+    NotEnforced {
+        /// Why confinement could not be applied.
+        reason: String,
+        /// Which kernel resource ceilings were applied, if any.
+        resource_limits: ResourceLimits,
+    },
+}
+
+impl SandboxStatus {
+    /// Whether OS-level confinement is active.
+    #[must_use]
+    pub fn is_enforced(&self) -> bool {
+        matches!(self, Self::Enforced { .. })
+    }
+}
+
 /// A request from the trusted host to the sandboxed worker.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -39,6 +115,12 @@ pub enum Request {
 
     /// Release all resources for the current document.
     CloseDocument,
+
+    /// Startup handshake. Must be the first message on a new worker.
+    Handshake,
+
+    /// Ask the worker to exit cleanly.
+    Shutdown,
 }
 
 /// A reply from the worker.
@@ -74,6 +156,14 @@ pub enum Response {
         text: String,
     },
 
+    /// Handshake reply, sent once at startup.
+    Ready {
+        /// Worker version, checked against the host's own.
+        version: String,
+        /// What confinement the worker managed to apply to itself.
+        sandbox: SandboxStatus,
+    },
+
     /// The request completed with nothing to return.
     Ok,
 
@@ -107,6 +197,20 @@ pub enum WorkerError {
     /// rather than retrying the same input in the same process.
     #[error("worker process terminated unexpectedly")]
     WorkerDied,
+
+    /// The worker did not answer within the deadline.
+    ///
+    /// Treated the same as death: the process is killed rather than waited on,
+    /// because a worker stuck on a pathological document will not recover.
+    #[error("worker did not respond within {timeout_ms}ms")]
+    Timeout {
+        /// The deadline that elapsed.
+        timeout_ms: u64,
+    },
+
+    /// The channel to the worker failed.
+    #[error("worker channel failed: {0}")]
+    Channel(String),
 }
 
 impl Response {
@@ -159,6 +263,32 @@ mod tests {
         let encoded = serde_json::to_string(&request).unwrap();
         let decoded: Request = serde_json::from_str(&encoded).unwrap();
         assert_eq!(request, decoded);
+    }
+
+    #[test]
+    fn sandbox_status_distinguishes_enforced_from_not() {
+        let enforced = SandboxStatus::Enforced {
+            mechanism: "seatbelt".into(),
+            resource_limits: ResourceLimits::none(),
+        };
+        assert!(enforced.is_enforced());
+
+        let not = SandboxStatus::NotEnforced {
+            reason: "unsupported platform".into(),
+            resource_limits: ResourceLimits::none(),
+        };
+        assert!(!not.is_enforced(), "unconfined must never report as enforced");
+    }
+
+    #[test]
+    fn resource_limits_report_memory_gaps_rather_than_hiding_them() {
+        // macOS rejects RLIMIT_AS, so this case is real, not hypothetical.
+        let partial = ResourceLimits {
+            core_dumps_disabled: true,
+            cpu_seconds: Some(120),
+            address_space_bytes: None,
+        };
+        assert!(!partial.memory_capped(), "a missing memory ceiling must be visible");
     }
 
     #[test]

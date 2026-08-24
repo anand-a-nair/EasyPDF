@@ -756,6 +756,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "easypdf-worker"
+version = "0.0.0-dev"
+dependencies = [
+ "easypdf-core",
+ "easypdf-ffi",
+ "libc",
+]
+
+[[package]]
 name = "embed-resource"
 version = "3.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"

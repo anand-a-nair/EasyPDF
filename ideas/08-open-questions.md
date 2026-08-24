@@ -89,3 +89,30 @@ be unnecessary friction. Worth deciding before the second contributor, not after
 project; a problem if it grows. Worth a search before investing in branding.
 
 **Needed by:** before a public launch with any marketing behind it.
+
+## OQ-008 — How does the worker binary ship alongside the app?
+
+The app locates `easypdf-worker` beside its own executable. That works in
+development, where both land in `target/<profile>/`, but bundling is unsolved:
+Tauri's `externalBin` sidecar mechanism expects a target-triple naming
+convention, and the worker must end up inside the `.app`, `.msi`, and AppImage.
+
+Getting this wrong fails in a specific and bad way: the app runs, finds no
+worker, and would be tempted to fall back to in-process parsing — which would
+silently discard the entire security model. **There must be no such fallback.**
+No worker means no document, with a clear message.
+
+**Needed by:** first bundled build, Phase 1.
+
+## OQ-009 — Linux and Windows confinement
+
+macOS confinement is implemented and verified. The other two report
+`NotEnforced`, which means a worker there handles untrusted input with ordinary
+user privileges.
+
+Linux: landlock (filesystem) plus seccomp-bpf (syscalls). Windows: AppContainer
+plus a job object, applied by the parent at spawn rather than by the child.
+
+**Needed by:** before shipping on those platforms. Releasing a document tool
+with no confinement on two of three targets would undercut the security
+argument the project rests on.

@@ -11,16 +11,21 @@
 //! - The host trusts nothing the worker returns. A compromised worker will
 //!   send well-formed lies, so every field is validated on arrival.
 //!
-//! The current state is honest about its limits: the protocol and the limits
-//! are defined and tested, but **OS-level sandboxing is not yet applied** —
-//! that lands with the worker binary in Phase 0. Until then this is a process
-//! boundary, not yet a privilege boundary.
+//! The worker itself lives in the `easypdf-worker` crate. It confines itself
+//! at startup and reports what it managed to apply via
+//! [`protocol::SandboxStatus`], which the host must surface rather than assume
+//! — sandboxing that silently fails is worse than none, because the whole
+//! architecture is built on the assumption that it holds.
 
 // Tests legitimately assert on known-good values; the panic lints exist to
 // keep unwraps out of parsing paths, not out of assertions.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
+pub mod framing;
 pub mod limits;
 pub mod protocol;
+pub mod worker;
 
+pub use framing::{FrameError, MAX_FRAME_BYTES, read_frame, write_frame};
 pub use limits::Limits;
-pub use protocol::{Request, Response, WorkerError};
+pub use protocol::{Request, ResourceLimits, Response, SandboxStatus, WorkerError};
+pub use worker::Worker;
