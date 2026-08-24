@@ -1,0 +1,38 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Tauri
+/apps/desktop/target/
+/apps/desktop/gen/
+
+# Vendored native deps (see ideas/08-open-questions.md, OQ-001)
+/vendor/pdfium/
+
+# Test corpus — large binaries, pinned by hash rather than committed
+/tests/corpus/large/
+
+# Build & packaging output
+/build/
+/release/
+*.dmg
+*.msi
+*.AppImage
+*.deb
+
+# Editors
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
