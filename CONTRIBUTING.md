@@ -21,6 +21,22 @@ contribute: the decisions are still soft.
 - **Test corpus contributions** — real-world PDFs that break tools, particularly
   malformed ones. See [ideas/04-performance-budget.md](ideas/04-performance-budget.md).
 
+## Development setup
+
+```bash
+npm install -D @tauri-apps/cli@latest
+```
+
+Then verify the toolchain:
+
+```bash
+npx tauri info
+```
+
+Rust is pinned by `rust-toolchain.toml` — `rustup` picks up the right version
+automatically. Note that **Tauri cannot be cross-compiled**: each platform must
+be built on its own OS. See [ideas/12-build-and-release.md](ideas/12-build-and-release.md).
+
 ## Ground rules
 
 **The performance budget is binding.** A change that pushes past a budget in
@@ -40,6 +56,12 @@ the sandbox boundary, signatures, or encryption. The threat model in
 
 **Document the why.** For anything non-obvious, add or update a doc in `ideas/`
 in the same change. In two years the reasoning will be worth more than the code.
+Substantial technical decisions get an ADR in
+[ideas/03-tech-decisions.md](ideas/03-tech-decisions.md) — what was chosen, why,
+what was rejected, and what would make us revisit.
+
+**Versioning.** Semantic versioning; the canonical version lives in `.version`
+and every manifest derives from it. User-visible changes go in `CHANGELOG.md`.
 
 ## Licensing of contributions
 

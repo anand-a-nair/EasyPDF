@@ -59,9 +59,12 @@ rejected, is in [tech decisions](ideas/03-tech-decisions.md).
 
 ```
 EasyPDF/
-├── ideas/          design docs — vision, architecture, decisions, roadmap
-├── LICENSE         Apache-2.0
-└── NOTICE          attribution
+├── ideas/              design docs — vision, architecture, decisions, roadmap
+├── .version            canonical version (all manifests derive from it)
+├── rust-toolchain.toml pinned toolchain
+├── CHANGELOG.md        public release history
+├── SECURITY.md         vulnerability disclosure
+└── LICENSE / NOTICE    Apache-2.0
 ```
 
 Code directories arrive with Phase 0; see the [roadmap](ideas/05-roadmap.md).

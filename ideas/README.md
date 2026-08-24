@@ -14,6 +14,9 @@ before they get made in a directory structure.
 | [07-security.md](07-security.md) | Threat model — parsing hostile input is the core risk |
 | [08-open-questions.md](08-open-questions.md) | Unresolved decisions, tracked rather than forgotten |
 | [09-licensing.md](09-licensing.md) | License compatibility of every dependency |
+| [10-strategy.md](10-strategy.md) | How an open tool actually takes on Adobe |
+| [11-sustainability.md](11-sustainability.md) | Funding the work without charging users |
+| [12-build-and-release.md](12-build-and-release.md) | Toolchain, CI matrix, versioning, release checklist |
 
 ## How to use this folder
 

@@ -41,6 +41,14 @@ clearly, and not silently corrupt the file. Round-tripping a document without
 changing bytes we didn't intend to change is a hard requirement — this is where
 most PDF tools quietly fail.
 
+**Budget the experience, not the feature count.** "The ultimate PDF tool" and
+"15 MB, no bloat" are in genuine tension, and pretending otherwise causes pain
+later. The resolution: startup time, memory, and responsiveness are sacred and
+keep their veto. Installed size is a soft target, met by making heavy
+capabilities (OCR, accessibility tooling, preflight) **optional modules** that
+download on demand rather than shipping in the base installer. VLC is ~50 MB
+today — it didn't stay tiny, it stayed fast. See [10-strategy.md](10-strategy.md).
+
 **Restraint is a feature.** Every addition costs startup time, binary size,
 surface area, and attention. The performance budget has veto power over the
 feature list.

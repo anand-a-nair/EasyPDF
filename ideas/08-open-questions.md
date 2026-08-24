@@ -5,6 +5,16 @@ would resolve it and roughly when it needs an answer.
 
 ## OQ-001 — How is PDFium obtained and shipped?
 
+**Status: provisionally answered 2026-08-24 — vendoring a pinned prebuilt.**
+See TD-007. This is a momentum decision, not a final one: it trades a
+supply-chain risk on our most security-sensitive dependency for the ability to
+make progress now. **It must be resolved properly before any public release**,
+either by reproducing the build ourselves or by auditing provenance thoroughly.
+Leaving it provisional at 1.0 is a release blocker.
+
+The original framing, retained because the tradeoff hasn't changed:
+
+
 Building PDFium from source is a heavy lift (depot_tools, a long build). Using
 prebuilt binaries from a third-party release means trusting that supply chain
 for our most security-sensitive dependency, which sits uncomfortably next to
@@ -14,7 +24,7 @@ Options: build from source in CI and cache; vendor a pinned prebuilt with hash
 verification and a documented provenance; or dynamic-link to a system copy where
 one exists.
 
-**Needed by:** Phase 0. It shapes CI and the build.
+**Needed by:** resolved-for-now for Phase 0; full answer needed by first release.
 
 ## OQ-002 — Linux WebView story
 

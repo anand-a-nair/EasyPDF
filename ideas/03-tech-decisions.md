@@ -125,3 +125,50 @@ parse, build complexity) outweighs its benefit.
 **Revisit if:** the UI outgrows plain modules. Flagged as low confidence
 deliberately — this is the decision here most likely to be wrong, and reversing
 it is cheap compared to the others.
+
+---
+
+## TD-007 — Vendor a prebuilt PDFium (provisional)
+
+**Date:** 2026-08-24 · **Status:** **provisional — must be revisited before 1.0**
+
+Ship a pinned, hash-verified prebuilt PDFium binary rather than building it from
+source in CI.
+
+**Why:** building PDFium requires Google's `depot_tools` and GN/Ninja — a heavy,
+slow, unfamiliar build that would dominate Phase 0 and block all other progress.
+A prebuilt gets us to a rendering window in hours instead of days.
+
+**The cost, stated honestly:** this means trusting a third party's binary for the
+project's most security-sensitive dependency, which sits directly against threat
+T5 in [07-security.md](07-security.md). We are accepting that risk *temporarily*
+to gain momentum, not because it's acceptable at release.
+
+**Mandatory conditions while provisional:**
+- Pin by SHA-256 and verify at build time. Never fetch "latest".
+- Record the exact upstream source and provenance in the build config.
+- No public binary release ships on a third-party prebuilt without either
+  reproducing the build ourselves or auditing the provenance.
+
+**Revisit by:** end of Phase 1, and definitely before any public release. Tracked
+as OQ-001. If this note is still marked provisional when 1.0 approaches, that is
+a release blocker, not a footnote.
+
+---
+
+## TD-008 — Tauri CLI as a per-project npm dependency
+
+**Date:** 2026-08-24 · **Status:** accepted
+
+Install `@tauri-apps/cli` as a devDependency rather than a global cargo install.
+
+**Why:** the version gets pinned in the repo, so every contributor and every CI
+runner uses the same CLI. Globally installed tool versions drifting between
+machines is a recurring and annoying source of "works on mine". The frontend
+already requires npm, so this adds no new toolchain.
+
+**Related constraint (not a choice, a fact):** Tauri apps **cannot be
+cross-compiled**. Each platform links against its own native WebView and
+packaging tools, so macOS builds need macOS, Windows needs Windows, Linux needs
+Linux. Phase 0 CI must therefore be a three-runner matrix from the start. See
+[12-build-and-release.md](12-build-and-release.md).

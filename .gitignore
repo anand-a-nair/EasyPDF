@@ -27,6 +27,12 @@ dist/
 *.AppImage
 *.deb
 
+# AI agent working context — deliberately local, not committed.
+# See .claude/DECISIONS.md D-010: this means the changelist and decision log
+# do NOT survive a fresh clone. Revisit when a second contributor/machine appears.
+/.claude/
+/CLAUDE.md
+
 # Editors
 .idea/
 .vscode/*

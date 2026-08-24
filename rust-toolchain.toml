@@ -1,0 +1,7 @@
+# Pinned so every contributor and CI runner builds with an identical toolchain.
+# Bumping this is a decision — record it per .claude/RULES.md Rule 1.
+[toolchain]
+channel = "1.98.0"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = ["aarch64-apple-darwin"]
+profile = "default"
