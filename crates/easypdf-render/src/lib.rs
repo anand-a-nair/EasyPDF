@@ -1,9 +1,8 @@
 //! Rasterization and the tile cache.
 //!
-//! Rendering itself is delegated to PDFium (see `ideas/03-tech-decisions.md`,
-//! TD-003). PDFium is not yet vendored — TD-007 covers that — so this crate
-//! currently provides the cache and the trait boundary the engine will sit
-//! behind.
+//! Rendering is delegated to PDFium (see `ideas/03-tech-decisions.md`, TD-003),
+//! vendored as a hash-pinned prebuilt per TD-007 and installed by
+//! `scripts/fetch-pdfium.sh`.
 //!
 //! The cache exists from the start because an unbounded one is how a viewer
 //! turns a 400 MB scanned book into an out-of-memory crash. The budget in
@@ -13,8 +12,10 @@
 // keep unwraps out of parsing paths, not out of assertions.
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 pub mod cache;
+pub mod pdfium;
 
 pub use cache::{Tile, TileCache, TileKey, ZoomBucket};
+pub use pdfium::{PdfiumRasterizer, RenderError};
 
 /// Something that can rasterize pages.
 ///

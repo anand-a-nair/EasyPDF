@@ -154,6 +154,23 @@ to gain momentum, not because it's acceptable at release.
 as OQ-001. If this note is still marked provisional when 1.0 approaches, that is
 a release blocker, not a footnote.
 
+**Implemented 2026-08-24.** Source: `bblanchon/pdfium-binaries`, release
+`chromium/8009` (PDFium 153.0.8009.0). All four target archives are pinned by
+SHA-256 in `vendor/pdfium.lock`; `scripts/fetch-pdfium.sh` refuses to install on
+mismatch (verified by deliberately corrupting the hash — the script exits
+non-zero and leaves the previous good copy in place).
+
+Two build flags were read from `args.gn` inside the archive rather than taken on
+trust:
+
+- `pdf_enable_v8 = false` — **no JavaScript engine is present in the binary.**
+  This turns the policy in `ideas/07-security.md` into a structural property:
+  document JavaScript cannot execute because there is nothing to execute it.
+  The V8-enabled variants of the same release are 3.7x larger and must never be
+  used; the fetch script fails the build if it ever sees `pdf_enable_v8 = true`.
+- `pdf_enable_xfa = false` — matches the decision to detect and refuse XFA
+  forms rather than half-support them.
+
 ---
 
 ## TD-008 — Tauri CLI as a per-project npm dependency

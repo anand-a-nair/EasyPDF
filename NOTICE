@@ -7,5 +7,22 @@ Licensed under the Apache License, Version 2.0. See the LICENSE file
 for the full license text.
 
 --------------------------------------------------------------------
-Third-party components are listed in ideas/09-licensing.md along with
-their respective licenses. Each retains its original license terms.
+THIRD-PARTY COMPONENTS
+
+PDFium
+  Copyright 2014 The PDFium Authors
+  Licensed under BSD-3-Clause.
+  https://pdfium.googlesource.com/pdfium/
+
+  EasyPDF links against a prebuilt PDFium binary. The build used is
+  pinned by SHA-256 in vendor/pdfium.lock. It is compiled without V8
+  (pdf_enable_v8 = false), so no PDF JavaScript engine is present.
+
+pdfium-binaries (packaging of the above)
+  Copyright 2014-2025 Benoit Blanchon
+  Licensed under MIT.
+  https://github.com/bblanchon/pdfium-binaries
+
+Rust crate dependencies retain their own licenses; the full set is
+verified against an allowlist by deny.toml. See ideas/09-licensing.md
+for the compatibility rules.

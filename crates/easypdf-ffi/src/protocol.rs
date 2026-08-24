@@ -82,17 +82,21 @@ impl SandboxStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum Request {
-    /// Parse only the cross-reference table and trailer.
+    /// Hand the worker a document to open.
     ///
-    /// Deliberately minimal: this is what makes a 900-page document open as
-    /// fast as a 2-page one. Nothing else is parsed until it is needed.
-    /// See `ideas/02-architecture.md`.
+    /// Carries the **bytes**, never a path. This is not a convenience: the
+    /// sandbox denies the worker all filesystem access (verified by test), so
+    /// it could not open a path even if given one. The host reads the file and
+    /// passes the contents across.
+    ///
+    /// The cost is a copy through the channel, bounded by
+    /// [`crate::framing::MAX_FRAME_BYTES`]. Passing a file descriptor instead
+    /// would avoid both the copy and the ceiling — inherited descriptors
+    /// remain usable inside the sandbox — but needs `SCM_RIGHTS` on Unix and
+    /// handle duplication on Windows. Tracked as OQ-010.
     OpenDocument {
-        /// Index into the host's table of already-opened file handles.
-        ///
-        /// Never a path — the worker has no filesystem access and must not be
-        /// able to name a file it was not given.
-        handle: u32,
+        /// The document's raw bytes.
+        data: Vec<u8>,
         /// Password, if the document is encrypted.
         password: Option<String>,
     },
@@ -259,7 +263,7 @@ mod tests {
 
     #[test]
     fn requests_round_trip_through_serialization() {
-        let request = Request::OpenDocument { handle: 7, password: None };
+        let request = Request::OpenDocument { data: vec![1, 2, 3], password: None };
         let encoded = serde_json::to_string(&request).unwrap();
         let decoded: Request = serde_json::from_str(&encoded).unwrap();
         assert_eq!(request, decoded);
@@ -292,11 +296,13 @@ mod tests {
     }
 
     #[test]
-    fn open_document_carries_a_handle_not_a_path() {
-        // Structural guarantee: the worker cannot name a file it was not given.
+    fn open_document_never_carries_a_path() {
+        // Structural guarantee: the worker cannot name a file of its own
+        // choosing, because it is never told a filename at all.
         let encoded =
-            serde_json::to_string(&Request::OpenDocument { handle: 3, password: None }).unwrap();
-        assert!(encoded.contains("handle"));
-        assert!(!encoded.contains("path"));
+            serde_json::to_string(&Request::OpenDocument { data: vec![37], password: None })
+                .unwrap();
+        assert!(encoded.contains("data"));
+        assert!(!encoded.contains("path"), "a path must never cross this boundary");
     }
 }

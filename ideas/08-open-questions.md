@@ -116,3 +116,17 @@ plus a job object, applied by the parent at spawn rather than by the child.
 **Needed by:** before shipping on those platforms. Releasing a document tool
 with no confinement on two of three targets would undercut the security
 argument the project rests on.
+
+## OQ-010 — Pass a file descriptor instead of document bytes
+
+`OpenDocument` currently carries the document's bytes across the channel. That
+works and is safe, but it copies the whole file and caps documents at the
+256 MB frame ceiling — a real limit for the large scanned books in the test
+corpus.
+
+Descriptors inherited before confinement remain usable inside the sandbox, so
+passing one would remove both the copy and the ceiling. It needs `SCM_RIGHTS`
+on Unix and handle duplication on Windows, plus a host-side handle table.
+
+**Needed by:** Phase 1, when large-document performance is measured against
+the budget.

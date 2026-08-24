@@ -54,15 +54,14 @@ fn worker_confines_itself_before_accepting_input() {
 #[test]
 fn unimplemented_operations_refuse_clearly() {
     // Honest refusal over plausible nonsense — ideas/01-vision.md.
+    // Text extraction is the remaining unimplemented operation.
     let mut worker = spawn();
 
-    let response = worker
-        .request(&Request::OpenDocument { handle: 0, password: None })
-        .expect("worker should answer");
+    let response = worker.request(&Request::ExtractText { page: 0 }).expect("worker should answer");
 
     match response {
         Response::Failed(WorkerError::Unsupported(message)) => {
-            assert!(message.contains("PDFium"), "refusal should say why: {message}");
+            assert!(!message.is_empty(), "a refusal must explain itself");
         }
         other => panic!("expected an explicit refusal, got {other:?}"),
     }
@@ -81,6 +80,8 @@ fn worker_survives_a_sequence_of_requests() {
         let response = worker.request(&Request::ExtractText { page }).unwrap();
         assert!(matches!(response, Response::Failed(WorkerError::Unsupported(_))));
     }
+    // Still healthy after repeated refusals.
+    assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
 }
 
 #[test]
@@ -151,4 +152,135 @@ fn confinement_denies_filesystem_and_network_access() {
              Full report:\n{report}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Rendering through the boundary.
+//
+// These are the tests that matter most: they prove a page can be rasterized by
+// a process that has already given up filesystem and network access. If
+// rendering only worked unconfined, the architecture would not hold.
+// ---------------------------------------------------------------------------
+
+fn corpus(name: &str) -> Vec<u8> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus");
+    std::fs::read(root.join(name)).expect("corpus file should exist")
+}
+
+fn pdfium_available() -> bool {
+    let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "mac-arm64"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "mac-x64"
+    } else if cfg!(target_os = "windows") {
+        "win-x64"
+    } else {
+        "linux-x64"
+    };
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../vendor/pdfium")
+        .join(target)
+        .join("lib")
+        .is_dir()
+}
+
+macro_rules! require_pdfium {
+    () => {
+        if !pdfium_available() {
+            eprintln!("skipping: vendored PDFium not present (run scripts/fetch-pdfium.sh)");
+            return;
+        }
+    };
+}
+
+#[test]
+fn opens_a_real_document_inside_the_sandbox() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let response = worker
+        .request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None })
+        .unwrap();
+
+    match response {
+        Response::DocumentOpened { page_count, .. } => assert_eq!(page_count, 1),
+        other => panic!("expected DocumentOpened, got {other:?}"),
+    }
+}
+
+#[test]
+fn renders_a_page_inside_the_sandbox() {
+    // The whole architecture in one test: untrusted bytes go into a process
+    // with no filesystem and no network, and pixels come back.
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    let response =
+        worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 0 }).unwrap();
+
+    match response {
+        Response::PageRendered { width, height, pixels } => {
+            assert_eq!(width, 200);
+            assert_eq!(height, 100);
+            assert_eq!(pixels.len(), 200 * 100 * 4);
+
+            let dark = pixels.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
+            assert!(dark > 20, "page came back blank — only {dark} dark pixels");
+        }
+        other => panic!("expected PageRendered, got {other:?}"),
+    }
+}
+
+#[test]
+fn rendering_without_an_open_document_is_refused() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let response =
+        worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 0 }).unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+}
+
+#[test]
+fn malformed_document_is_refused_without_killing_the_worker() {
+    // A hostile document must not take the worker down: that would be a
+    // denial-of-service vector. The worker must stay usable afterwards.
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let response = worker
+        .request(&Request::OpenDocument { data: corpus("not-a-pdf.bin"), password: None })
+        .unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+
+    // Still alive and serving.
+    assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
+}
+
+#[test]
+fn truncated_document_is_refused_without_killing_the_worker() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let response = worker
+        .request(&Request::OpenDocument { data: corpus("truncated.pdf"), password: None })
+        .unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+    assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
+}
+
+#[test]
+fn close_document_forgets_the_document() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+    worker.request(&Request::CloseDocument).unwrap();
+
+    // Rendering must now fail: the bytes are gone, not lingering in memory.
+    let response =
+        worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 0 }).unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
 }

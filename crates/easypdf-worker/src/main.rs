@@ -20,12 +20,64 @@ mod sandbox;
 mod selftest;
 
 use std::io::{self, BufReader, BufWriter};
+use std::path::PathBuf;
 
 use easypdf_ffi::framing::{FrameError, read_frame, write_frame};
-use easypdf_ffi::protocol::{Request, Response, WorkerError};
+use easypdf_ffi::protocol::{Request, Response, SandboxStatus, WorkerError};
+use easypdf_render::cache::{TileKey, ZoomBucket};
+use easypdf_render::pdfium::PdfiumRasterizer;
+
+/// Worker state: the loaded engine and the document currently open.
+struct Session {
+    rasterizer: Option<PdfiumRasterizer>,
+    document: Option<Vec<u8>>,
+    password: Option<String>,
+}
+
+/// Where the vendored PDFium library lives, relative to this executable.
+///
+/// Loading it requires filesystem access, so it must happen **before** the
+/// sandbox is applied. That is not a hole in the model: a hash-pinned library
+/// loaded at startup is not untrusted input, and confinement still lands
+/// before the first document byte is read.
+fn pdfium_directory() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let target_dir = executable.parent()?;
+
+    let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        "mac-arm64"
+    } else if cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        "mac-x64"
+    } else if cfg!(target_os = "windows") {
+        "win-x64"
+    } else {
+        "linux-x64"
+    };
+
+    // Development layout: target/<profile>/ -> repo root -> vendor/.
+    let repo_root = target_dir.parent()?.parent()?;
+    let vendored = repo_root.join("vendor/pdfium").join(target).join("lib");
+    if vendored.is_dir() {
+        return Some(vendored);
+    }
+
+    // Bundled layout: the library sits beside the executable. See OQ-008.
+    Some(target_dir.to_path_buf())
+}
 
 fn main() {
-    // Before anything else. Nothing above this line may touch input.
+    // Load the engine first: binding the library needs file access, which the
+    // sandbox is about to remove.
+    let rasterizer =
+        pdfium_directory().and_then(|directory| match PdfiumRasterizer::load_from(&directory) {
+            Ok(rasterizer) => Some(rasterizer),
+            Err(error) => {
+                eprintln!("easypdf-worker: PDFium unavailable: {error}");
+                None
+            }
+        });
+
+    // Now confine. Nothing below this line has touched input yet.
     let sandbox_status = sandbox::apply();
 
     if !sandbox_status.is_enforced() {
@@ -41,6 +93,8 @@ fn main() {
     if std::env::var_os("EASYPDF_WORKER_SELFTEST").is_some() {
         selftest::run_and_exit();
     }
+
+    let mut session = Session { rasterizer, document: None, password: None };
 
     let mut stdin = BufReader::new(io::stdin());
     let mut stdout = BufWriter::new(io::stdout());
@@ -60,7 +114,7 @@ fn main() {
             break;
         }
 
-        let response = handle(&request, &sandbox_status);
+        let response = handle(&request, &sandbox_status, &mut session);
 
         if let Err(error) = write_frame(&mut stdout, &response) {
             eprintln!("easypdf-worker: could not send response: {error}");
@@ -69,29 +123,66 @@ fn main() {
     }
 }
 
-fn handle(request: &Request, sandbox_status: &easypdf_ffi::protocol::SandboxStatus) -> Response {
+fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Session) -> Response {
     match request {
         Request::Handshake => Response::Ready {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             sandbox: sandbox_status.clone(),
         },
 
-        // Everything below needs a PDF engine, which is not vendored yet.
-        // Refusing clearly beats returning plausible-looking nonsense — see
-        // the correctness principle in ideas/01-vision.md.
-        Request::OpenDocument { .. } => Response::Failed(WorkerError::Unsupported(
-            "document parsing is not implemented yet (PDFium not vendored — TD-007)".to_owned(),
-        )),
+        Request::OpenDocument { data, password } => {
+            let Some(rasterizer) = session.rasterizer.as_ref() else {
+                return Response::Failed(engine_missing());
+            };
 
-        Request::RenderPage { .. } => Response::Failed(WorkerError::Unsupported(
-            "page rendering is not implemented yet (PDFium not vendored — TD-007)".to_owned(),
-        )),
+            match rasterizer.page_count(data, password.as_deref()) {
+                Ok(page_count) => {
+                    session.document = Some(data.clone());
+                    session.password = password.clone();
+                    Response::DocumentOpened {
+                        page_count,
+                        // Reported honestly as unknown for now: distinguishing
+                        // these requires reading the document's encryption
+                        // dictionary and signature fields, which arrives with
+                        // easypdf-crypto in Phase 3.
+                        encrypted: password.is_some(),
+                        signed: false,
+                    }
+                }
+                Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
+            }
+        }
+
+        Request::RenderPage { page, zoom, rotation } => {
+            let Some(rasterizer) = session.rasterizer.as_ref() else {
+                return Response::Failed(engine_missing());
+            };
+            let Some(document) = session.document.as_ref() else {
+                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+            };
+
+            let key =
+                TileKey { page: *page, zoom: ZoomBucket::from_zoom(*zoom), rotation: *rotation };
+
+            match rasterizer.render(document, session.password.as_deref(), key) {
+                Ok(tile) => Response::PageRendered {
+                    width: tile.width,
+                    height: tile.height,
+                    pixels: tile.pixels,
+                },
+                Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
+            }
+        }
 
         Request::ExtractText { .. } => Response::Failed(WorkerError::Unsupported(
-            "text extraction is not implemented yet (PDFium not vendored — TD-007)".to_owned(),
+            "text extraction is not implemented yet".to_owned(),
         )),
 
-        Request::CloseDocument => Response::Ok,
+        Request::CloseDocument => {
+            session.document = None;
+            session.password = None;
+            Response::Ok
+        }
 
         // Handled by the caller before reaching here.
         Request::Shutdown => Response::Ok,
@@ -103,4 +194,11 @@ fn handle(request: &Request, sandbox_status: &easypdf_ffi::protocol::SandboxStat
             "request not understood by this worker version: {unknown:?}"
         ))),
     }
+}
+
+/// The engine failed to load. Never falls back to in-process parsing (D-017).
+fn engine_missing() -> WorkerError {
+    WorkerError::Unsupported(
+        "PDFium is not available to this worker; run scripts/fetch-pdfium.sh".to_owned(),
+    )
 }

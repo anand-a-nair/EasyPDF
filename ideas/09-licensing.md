@@ -23,6 +23,7 @@ via `cargo-deny` with an allowlist.
 | Component | License | Status |
 |---|---|---|
 | PDFium | BSD-3-Clause | ✅ Compatible — the reason this stack works |
+| pdfium-binaries (packaging) | MIT | ✅ — the prebuilt we vendor |
 | Tauri | MIT / Apache-2.0 | ✅ |
 | Rust stdlib & most crates | MIT / Apache-2.0 | ✅ |
 | **MuPDF** | **AGPL-3.0** | ❌ **Do not use** — would force copyleft project-wide |

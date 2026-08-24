@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 easypdf-ffi.workspace = true
 easypdf-core.workspace = true
+easypdf-render.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

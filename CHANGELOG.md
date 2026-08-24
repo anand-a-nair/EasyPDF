@@ -32,14 +32,15 @@ The canonical version is in [`.version`](.version).
 - Length-prefixed worker protocol with allocation limits validated before use,
   timeout and death handling, and a restart path that cannot accidentally reuse
   a dead process
+- PDF rendering via a hash-pinned, vendored PDFium build with no JavaScript
+  engine compiled in, so document scripts cannot execute
 - Tauri desktop shell with a dependency-free TypeScript frontend
 - CI: three-OS build matrix, formatting, lints, tests, `cargo-deny` license and
   advisory gate, binary size budget, version-consistency check
 - Nightly fuzzing workflow (placeholder until the parser exists)
 
 ### Notes
-- No PDF rendering yet — PDFium is not vendored. The window opens and reaches
-  the Rust core; that is the extent of Phase 0. See the
-  [roadmap](ideas/05-roadmap.md).
+- Pages render inside the sandboxed worker, but are not yet displayed in the
+  window — that is Phase 1 UI work. See the [roadmap](ideas/05-roadmap.md).
 
 [Unreleased]: https://github.com/anandnair/easypdf/compare/main...HEAD
