@@ -40,7 +40,8 @@ The canonical version is in [`.version`](.version).
 - Nightly fuzzing workflow (placeholder until the parser exists)
 
 ### Notes
-- Pages render inside the sandboxed worker, but are not yet displayed in the
-  window — that is Phase 1 UI work. See the [roadmap](ideas/05-roadmap.md).
+- Page viewer: open a PDF, navigate pages, zoom, fit to window, with
+  progressive rendering and a memory-bounded tile cache
+- Toolbar badge showing whether the worker is actually sandboxed
 
 [Unreleased]: https://github.com/anandnair/easypdf/compare/main...HEAD

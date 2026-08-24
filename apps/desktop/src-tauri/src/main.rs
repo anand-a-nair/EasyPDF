@@ -7,12 +7,17 @@
 // Suppress the extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod session;
+
 use std::path::PathBuf;
 
 use easypdf_core::{Document, Page, PageSize, Rotation};
 use easypdf_ffi::protocol::SandboxStatus;
 use easypdf_ffi::worker::Worker;
 use serde::Serialize;
+use session::{DocumentInfo, Session};
+use tauri::State;
+use tauri::ipc::Response as IpcResponse;
 
 /// Reported to the frontend so it can confirm the IPC path works end to end.
 #[derive(Debug, Serialize)]
@@ -95,6 +100,41 @@ fn worker_status() -> WorkerStatus {
     }
 }
 
+/// Opens a document from a path chosen by the user.
+///
+/// The path comes from the native file dialog on the frontend, never from
+/// document content. The host reads the bytes; the worker is never told a
+/// filename (D-019).
+#[tauri::command]
+fn open_document(path: String, session: State<'_, Session>) -> Result<DocumentInfo, String> {
+    session.open(std::path::Path::new(&path))
+}
+
+/// Renders a page and returns raw pixels.
+///
+/// Returns [`IpcResponse`] rather than a JSON value: a single page is hundreds
+/// of kilobytes of pixels, and base64 inside JSON would inflate that by a third
+/// and cost a parse on both sides for every tile.
+///
+/// Layout: `u32` width, `u32` height, then RGBA bytes — both little-endian.
+#[tauri::command]
+fn render_page(page: usize, zoom: f32, session: State<'_, Session>) -> Result<IpcResponse, String> {
+    let rendered = session.render(page, zoom)?;
+    Ok(IpcResponse::new(rendered.into_wire_format()))
+}
+
+/// Closes the open document and frees its cached tiles.
+#[tauri::command]
+fn close_document(session: State<'_, Session>) -> Result<(), String> {
+    session.close()
+}
+
+/// The currently open document, if any.
+#[tauri::command]
+fn document_info(session: State<'_, Session>) -> Option<DocumentInfo> {
+    session.info()
+}
+
 /// Returns proof that the shell can reach the core document model.
 ///
 /// A placeholder in the sense that it does nothing useful yet, but a real
@@ -115,8 +155,19 @@ fn core_status() -> CoreStatus {
 // outcome. The lint exists to keep unwraps out of parsing paths, not here.
 #[allow(clippy::expect_used)]
 fn main() {
+    let worker = worker_path().unwrap_or_else(|| PathBuf::from("easypdf-worker"));
+
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![core_status, worker_status])
+        .plugin(tauri_plugin_dialog::init())
+        .manage(Session::new(worker))
+        .invoke_handler(tauri::generate_handler![
+            core_status,
+            worker_status,
+            open_document,
+            render_page,
+            close_document,
+            document_info
+        ])
         .run(tauri::generate_context!())
         .expect("failed to start the EasyPDF window");
 }

@@ -7,21 +7,37 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main id="app">
-      <h1>EasyPDF</h1>
-      <p class="subtitle">Phase 0 — foundation</p>
-      <dl id="status">
-        <dt>Shell</dt>
-        <dd id="shell-status">checking…</dd>
-        <dt>Core</dt>
-        <dd id="core-status">checking…</dd>
-        <dt>Worker</dt>
-        <dd id="worker-status">checking…</dd>
-      </dl>
-      <p class="note">
-        No document rendering yet. PDFium is not vendored — see TD-007.
-      </p>
+    <header id="toolbar">
+      <button id="open" type="button" class="primary">Open…</button>
+
+      <div class="group" data-requires-document>
+        <button id="prev" type="button" title="Previous page">‹</button>
+        <span id="page-indicator">— / —</span>
+        <button id="next" type="button" title="Next page">›</button>
+      </div>
+
+      <div class="group" data-requires-document>
+        <button id="zoom-out" type="button" title="Zoom out">−</button>
+        <span id="zoom-indicator">100%</span>
+        <button id="zoom-in" type="button" title="Zoom in">+</button>
+        <button id="zoom-fit" type="button">Fit</button>
+      </div>
+
+      <span id="doc-name"></span>
+      <span id="sandbox-badge" title="Worker confinement status"></span>
+    </header>
+
+    <main id="viewport">
+      <div id="empty-state">
+        <h1>EasyPDF</h1>
+        <p>Open a PDF to get started. Nothing leaves this machine.</p>
+        <button id="open-empty" type="button" class="primary">Open a PDF…</button>
+      </div>
+      <canvas id="page" hidden></canvas>
     </main>
+
+    <div id="error" role="alert" hidden></div>
+
     <script type="module" src="main.js"></script>
   </body>
 </html>

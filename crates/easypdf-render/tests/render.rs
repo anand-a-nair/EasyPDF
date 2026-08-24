@@ -179,3 +179,41 @@ fn concurrent_rendering_is_safe() {
         assert!(width == 200 || width == 400);
     }
 }
+
+/// The full viewer pipeline on real output.
+///
+/// Renders a page, converts BGRA to RGBA, encodes it for transport, decodes it
+/// back, and checks the image survived. This is the path every displayed page
+/// takes; unit tests on synthetic buffers would not catch a mistake that only
+/// shows up on real pixel data.
+#[test]
+fn rendered_page_survives_the_full_display_pipeline() {
+    use easypdf_render::wire::{bgra_to_rgba, decode_page, encode_page};
+
+    let rasterizer = rasterizer_or_skip!();
+    let tile = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 1.0)).unwrap();
+
+    let original = tile.pixels.clone();
+    let rgba = bgra_to_rgba(tile.pixels);
+
+    let encoded = encode_page(tile.width, tile.height, &rgba);
+    let decoded = decode_page(&encoded).expect("a freshly encoded page must decode");
+
+    assert_eq!(decoded.width, 200);
+    assert_eq!(decoded.height, 100);
+    assert_eq!(decoded.pixels.len(), 200 * 100 * 4);
+
+    // Red and blue swapped, green and alpha untouched.
+    for (index, (before, after)) in original.iter().zip(decoded.pixels.iter()).enumerate() {
+        match index % 4 {
+            1 | 3 => assert_eq!(before, after, "green/alpha changed at byte {index}"),
+            _ => {}
+        }
+    }
+    assert_eq!(decoded.pixels[0], original[2], "red should come from the blue slot");
+    assert_eq!(decoded.pixels[2], original[0], "blue should come from the red slot");
+
+    // And it is still a page with text on it, not a flat field.
+    let dark = decoded.pixels.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
+    assert!(dark > 20, "pipeline produced a blank page: {dark} dark pixels");
+}

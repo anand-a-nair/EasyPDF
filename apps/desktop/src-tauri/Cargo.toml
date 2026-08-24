@@ -18,6 +18,7 @@ serde.workspace = true
 easypdf-core.workspace = true
 easypdf-render.workspace = true
 easypdf-ffi.workspace = true
+tauri-plugin-dialog = "2.7.2"
 
 [lints]
 workspace = true
