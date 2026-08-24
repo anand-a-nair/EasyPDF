@@ -1,0 +1,64 @@
+# Dependency license and advisory gate.
+#
+# Enforces the standing rule in ideas/09-licensing.md: GPL and AGPL components
+# are excluded, because adopting one silently relicenses the entire project.
+# Adding a license here is a project-level decision — record it per
+# .claude/RULES.md Rule 1.
+
+[graph]
+all-features = true
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+allow = [
+    "Apache-2.0",
+    # Apache-2.0 with the LLVM exception, which only *removes* obligations.
+    # Used by target-lexicon and other compiler-adjacent crates.
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "MPL-2.0",
+    "CC0-1.0",
+    "Unlicense",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Our own crates are path dependencies within this workspace and therefore have
+# no meaningful version requirement. The wildcard check is aimed at wildcards on
+# *external* crates, which are a real supply-chain hazard.
+allow-wildcard-paths = true
+
+# Copyleft engines that would force relicensing. Never accept these.
+deny = [
+    { name = "mupdf", reason = "AGPL-3.0 — would force copyleft project-wide" },
+    { name = "mupdf-sys", reason = "AGPL-3.0 — would force copyleft project-wide" },
+    { name = "poppler", reason = "GPL — would force copyleft project-wide" },
+]
+
+[advisories]
+version = 2
+yanked = "deny"
+
+# Security *vulnerabilities* always fail the build — that is the point of this
+# gate and must not be weakened.
+#
+# "Unmaintained" notices are scoped to crates we chose ourselves. As of
+# 2026-08-24 the dependency tree carries 16 unmaintained advisories and zero
+# vulnerabilities; every one of them is transitive through Tauri (gtk-rs for the
+# Linux WebView, unic-* via urlpattern, proc-macro-error via a macro crate).
+# None has an available upgrade, and none is fixable from here — failing CI on
+# them would train everyone to ignore this gate, which is worse than not having
+# it. See decision D-012.
+unmaintained = "workspace"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

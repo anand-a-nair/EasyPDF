@@ -1,0 +1,16 @@
+[package]
+name = "easypdf-render"
+description = "Page rasterization via PDFium, with a bounded tile cache."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

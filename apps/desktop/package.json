@@ -1,0 +1,21 @@
+{
+  "name": "easypdf-desktop",
+  "private": true,
+  "version": "0.0.0-dev",
+  "type": "module",
+  "description": "EasyPDF desktop shell",
+  "license": "Apache-2.0",
+  "scripts": {
+    "build": "tsc && node scripts/copy-static.mjs",
+    "dev": "tauri dev",
+    "tauri": "tauri",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  }
+}

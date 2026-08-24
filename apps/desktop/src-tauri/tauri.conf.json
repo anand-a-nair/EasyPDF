@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "EasyPDF",
+  "version": "0.0.0",
+  "identifier": "org.easypdf.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "beforeDevCommand": "npm run build",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "EasyPDF",
+        "width": 1100,
+        "height": 780,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self' ipc: http://ipc.localhost",
+      "freezePrototype": true
+    },
+    "withGlobalTauri": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "category": "Productivity",
+    "copyright": "Copyright 2026 EasyPDF Contributors",
+    "shortDescription": "A fast, local PDF tool.",
+    "longDescription": "View, edit, annotate, sign, and encrypt PDFs. No account, no cloud, no subscription."
+  }
+}

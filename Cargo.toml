@@ -1,0 +1,47 @@
+[workspace]
+resolver = "3"
+members = ["crates/*", "apps/desktop/src-tauri"]
+
+[workspace.package]
+version = "0.0.0-dev"
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/anand-a-nair/EasyPDF"
+authors = ["EasyPDF Contributors"]
+# Nothing is published to crates.io yet. Publishing the library crates is a
+# decision that hasn't been made — when it is, they need real version
+# requirements on each other rather than workspace path inheritance.
+publish = false
+
+[workspace.dependencies]
+easypdf-core = { path = "crates/easypdf-core" }
+easypdf-render = { path = "crates/easypdf-render" }
+easypdf-crypto = { path = "crates/easypdf-crypto" }
+easypdf-ffi = { path = "crates/easypdf-ffi" }
+
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+unsafe_code = "deny"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+# Panicking on malformed input is a denial-of-service vector. Parsing paths must
+# return errors, not unwrap. See ideas/07-security.md (T3).
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+# Tuned for the size budget in ideas/04-performance-budget.md.
+# These are load-bearing, not cosmetic — changing them needs a recorded decision.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

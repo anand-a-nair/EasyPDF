@@ -1,0 +1,23 @@
+name: Fuzz
+
+# Parsing hostile input is this project's core risk, so fuzzing is scheduled
+# rather than optional. Runs nightly instead of per-commit because useful fuzz
+# runs take time. See ideas/07-security.md.
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    name: Fuzz the parser
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Placeholder
+        run: |
+          echo "No fuzz targets yet — the parser arrives in Phase 1."
+          echo "When it does: cargo install cargo-fuzz && cargo fuzz run parse -- -max_total_time=1800"
+          echo "Every crash found becomes a regression test."

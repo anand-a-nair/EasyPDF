@@ -19,8 +19,19 @@ The canonical version is in [`.version`](.version).
   sustainability, build and release process
 - Development scaffolding: pinned Rust toolchain, editor config, versioning
 
+- Cargo workspace with four crates: `easypdf-core` (document model, page
+  operations, undoable command stack), `easypdf-render` (memory-bounded LRU
+  tile cache), `easypdf-crypto` (encryption policy, permissions, signature
+  verification model), `easypdf-ffi` (sandboxed worker protocol and resource
+  limits)
+- Tauri desktop shell with a dependency-free TypeScript frontend
+- CI: three-OS build matrix, formatting, lints, tests, `cargo-deny` license and
+  advisory gate, binary size budget, version-consistency check
+- Nightly fuzzing workflow (placeholder until the parser exists)
+
 ### Notes
-- No application code yet. The project is in Phase 0 (foundation); see the
+- No PDF rendering yet — PDFium is not vendored. The window opens and reaches
+  the Rust core; that is the extent of Phase 0. See the
   [roadmap](ideas/05-roadmap.md).
 
 [Unreleased]: https://github.com/anandnair/easypdf/compare/main...HEAD

@@ -5,9 +5,10 @@
 View, edit, annotate, fill, sign, and encrypt PDFs — without a subscription,
 without an account, and without your documents leaving your machine.
 
-> **Status: pre-alpha.** Design and planning are underway; there's nothing to
-> install yet. The thinking lives in [`ideas/`](ideas/) and is worth reading if
-> you're considering contributing.
+> **Status: pre-alpha, Phase 0.** The foundation builds and runs — a window
+> opens and reaches the Rust core — but no PDF rendering yet. The thinking
+> lives in [`ideas/`](ideas/) and is worth reading if you're considering
+> contributing.
 
 ## Why
 
@@ -59,15 +60,34 @@ rejected, is in [tech decisions](ideas/03-tech-decisions.md).
 
 ```
 EasyPDF/
-├── ideas/              design docs — vision, architecture, decisions, roadmap
-├── .version            canonical version (all manifests derive from it)
-├── rust-toolchain.toml pinned toolchain
-├── CHANGELOG.md        public release history
-├── SECURITY.md         vulnerability disclosure
-└── LICENSE / NOTICE    Apache-2.0
+├── crates/
+│   ├── easypdf-core/     document model, page ops, undo stack
+│   ├── easypdf-render/   rasterization + bounded tile cache
+│   ├── easypdf-crypto/   encryption, permissions, signatures
+│   └── easypdf-ffi/      sandboxed worker protocol + safety limits
+├── apps/desktop/         Tauri shell (TypeScript frontend, no framework)
+├── ideas/                design docs — the actual specification
+├── scripts/              version sync, binary size gate
+└── .github/workflows/    CI: three-OS matrix, lint, deny, size
 ```
 
-Code directories arrive with Phase 0; see the [roadmap](ideas/05-roadmap.md).
+### Building
+
+```bash
+npm install --prefix apps/desktop
+```
+
+```bash
+cargo test --workspace
+```
+
+```bash
+npm run tauri dev --prefix apps/desktop
+```
+
+Release binary is currently **3.86 MB** — for comparison, an equivalent
+Electron shell starts around 120 MB. See the
+[performance budget](ideas/04-performance-budget.md).
 
 ## Contributing
 
