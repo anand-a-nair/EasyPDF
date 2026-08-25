@@ -12,18 +12,38 @@ import pathlib
 
 
 def build_pdf(text: str, width: int = 200, height: int = 100) -> bytes:
-    content = f"BT /F1 24 Tf 20 40 Td ({text}) Tj ET".encode("ascii")
+    return build_multipage([text], width, height)
 
-    objects = [
+
+def build_multipage(texts: list[str], width: int = 200, height: int = 100) -> bytes:
+    """Builds a document with one page per entry in `texts`.
+
+    Object numbering: 1 = catalog, 2 = page tree, 3 = font, then a page object
+    and a content stream per page.
+    """
+    page_count = len(texts)
+    first_page_obj = 4
+    kids = " ".join(f"{first_page_obj + i * 2} 0 R" for i in range(page_count))
+
+    objects: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
-            f"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
-        ).encode("ascii"),
+        f"<< /Type /Pages /Kids [{kids}] /Count {page_count} >>".encode("ascii"),
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n" + content + b"\nendstream",
     ]
+
+    for index, text in enumerate(texts):
+        content = f"BT /F1 24 Tf 20 40 Td ({text}) Tj ET".encode("ascii")
+        contents_obj = first_page_obj + index * 2 + 1
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width} {height}] "
+                f"/Resources << /Font << /F1 3 0 R >> >> /Contents {contents_obj} 0 R >>"
+            ).encode("ascii")
+        )
+        objects.append(
+            b"<< /Length " + str(len(content)).encode() + b" >>\nstream\n"
+            + content + b"\nendstream"
+        )
 
     out = bytearray(b"%PDF-1.7\n")
     offsets = []
@@ -59,6 +79,12 @@ def main() -> None:
     # Valid header, ruined body — the "looks plausible until you read it" case.
     full = build_pdf("Truncated")
     (corpus / "truncated.pdf").write_bytes(full[: len(full) // 2])
+    # Enough pages to make per-request re-parsing visible in a benchmark and to
+    # exercise scroll virtualisation. Every page carries distinct text so page
+    # identity is checkable.
+    (corpus / "many-pages.pdf").write_bytes(
+        build_multipage([f"Page {n + 1} of 200" for n in range(200)])
+    )
 
     for path in sorted(corpus.iterdir()):
         print(f"{path.name:20} {path.stat().st_size:>6} bytes")

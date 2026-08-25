@@ -18,7 +18,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use pdfium_render::prelude::{PdfRenderConfig, PdfSearchDirection, PdfSearchOptions, Pdfium};
+use pdfium_render::prelude::{
+    PdfDocument, PdfRenderConfig, PdfSearchDirection, PdfSearchOptions, Pdfium,
+};
 
 use easypdf_core::text::{SearchHit, TextRect};
 
@@ -154,33 +156,82 @@ impl PdfiumRasterizer {
         }
     }
 
-    /// Renders one page of an in-memory document.
+    /// Parses a document once and keeps it open.
     ///
-    /// Takes bytes rather than a path: the worker is handed an already-open
-    /// document and must never be able to name a file of its own choosing.
-    pub fn render(
+    /// **This is the difference between a usable viewer and an unusable one.**
+    /// Every operation previously re-parsed the whole file: each page render,
+    /// each size query, each search. On a large document that is seconds of
+    /// work repeated for every scroll tick.
+    ///
+    /// Takes ownership of the bytes because PDFium reads from that buffer
+    /// lazily for the document's whole lifetime — it must not be freed or
+    /// moved underneath it.
+    pub fn open(
         &self,
-        document: &[u8],
+        bytes: Vec<u8>,
         password: Option<&str>,
-        key: TileKey,
-    ) -> Result<Tile, RenderError> {
+    ) -> Result<OpenDocument, RenderError> {
         let _guard = render_lock();
 
         let document = self
             .pdfium
-            .load_pdf_from_byte_slice(document, password)
+            .load_pdf_from_byte_vec(bytes, password)
             .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
 
-        let pages = document.pages();
-        let total = usize::try_from(pages.len()).unwrap_or(0);
-        if key.page >= total {
-            return Err(RenderError::PageOutOfRange { requested: key.page, total });
+        Ok(OpenDocument { document })
+    }
+}
+
+/// A parsed document, held open for the session.
+///
+/// Not `Send`: PDFium state belongs to the thread that created it, and the
+/// worker is single-threaded by design. The type system enforcing that is a
+/// feature, not an inconvenience.
+pub struct OpenDocument {
+    document: PdfDocument<'static>,
+}
+
+impl std::fmt::Debug for OpenDocument {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpenDocument").field("pages", &self.page_count()).finish()
+    }
+}
+
+impl OpenDocument {
+    /// Number of pages.
+    #[must_use]
+    pub fn page_count(&self) -> usize {
+        usize::try_from(self.document.pages().len()).unwrap_or(0)
+    }
+
+    fn page_index(&self, page: usize) -> Result<i32, RenderError> {
+        let total = self.page_count();
+        if page >= total {
+            return Err(RenderError::PageOutOfRange { requested: page, total });
         }
+        i32::try_from(page).map_err(|_| RenderError::PageOutOfRange { requested: page, total })
+    }
 
-        let index = i32::try_from(key.page)
-            .map_err(|_| RenderError::PageOutOfRange { requested: key.page, total })?;
+    /// A page's dimensions in points, without rendering it.
+    pub fn page_size(&self, page: usize) -> Result<(f32, f32), RenderError> {
+        let _guard = render_lock();
+        let index = self.page_index(page)?;
 
-        let page = pages.get(index).map_err(|error| RenderError::PageFailed {
+        let handle = self
+            .document
+            .pages()
+            .get(index)
+            .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
+
+        Ok((handle.width().value, handle.height().value))
+    }
+
+    /// Rasterizes one page.
+    pub fn render(&self, key: TileKey) -> Result<Tile, RenderError> {
+        let _guard = render_lock();
+        let index = self.page_index(key.page)?;
+
+        let page = self.document.pages().get(index).map_err(|error| RenderError::PageFailed {
             page: key.page,
             reason: error.to_string(),
         })?;
@@ -200,61 +251,25 @@ impl PdfiumRasterizer {
             reason: error.to_string(),
         })?;
 
-        let pixels = bitmap.as_raw_bytes();
-        let width = u32::try_from(bitmap.width()).unwrap_or(0);
-        let height = u32::try_from(bitmap.height()).unwrap_or(0);
-
-        Ok(Tile { width, height, pixels })
-    }
-
-    /// A page's dimensions in points, without rendering it.
-    pub fn page_size(
-        &self,
-        document: &[u8],
-        password: Option<&str>,
-        page: usize,
-    ) -> Result<(f32, f32), RenderError> {
-        let _guard = render_lock();
-
-        let document = self
-            .pdfium
-            .load_pdf_from_byte_slice(document, password)
-            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
-
-        let pages = document.pages();
-        let total = usize::try_from(pages.len()).unwrap_or(0);
-        let index = i32::try_from(page)
-            .map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
-
-        let page_handle =
-            pages.get(index).map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
-
-        Ok((page_handle.width().value, page_handle.height().value))
+        Ok(Tile {
+            width: u32::try_from(bitmap.width()).unwrap_or(0),
+            height: u32::try_from(bitmap.height()).unwrap_or(0),
+            pixels: bitmap.as_raw_bytes(),
+        })
     }
 
     /// Extracts a page's text in reading order.
-    pub fn extract_text(
-        &self,
-        document: &[u8],
-        password: Option<&str>,
-        page: usize,
-    ) -> Result<String, RenderError> {
+    pub fn extract_text(&self, page: usize) -> Result<String, RenderError> {
         let _guard = render_lock();
+        let index = self.page_index(page)?;
 
-        let document = self
-            .pdfium
-            .load_pdf_from_byte_slice(document, password)
-            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
+        let handle = self
+            .document
+            .pages()
+            .get(index)
+            .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
 
-        let pages = document.pages();
-        let total = usize::try_from(pages.len()).unwrap_or(0);
-        let index = i32::try_from(page)
-            .map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
-
-        let page_handle =
-            pages.get(index).map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
-
-        let text = page_handle
+        let text = handle
             .text()
             .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
 
@@ -268,8 +283,6 @@ impl PdfiumRasterizer {
     /// silently capped result count is a lie about the document.
     pub fn search(
         &self,
-        document: &[u8],
-        password: Option<&str>,
         query: &str,
         match_case: bool,
     ) -> Result<(Vec<SearchHit>, bool), RenderError> {
@@ -279,20 +292,15 @@ impl PdfiumRasterizer {
 
         let _guard = render_lock();
 
-        let document = self
-            .pdfium
-            .load_pdf_from_byte_slice(document, password)
-            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
-
         let options = PdfSearchOptions::new().match_case(match_case);
         let mut hits = Vec::new();
         let mut truncated = false;
 
-        for (index, page_handle) in document.pages().iter().enumerate() {
-            let Ok(text) = page_handle.text() else {
+        for (index, page) in self.document.pages().iter().enumerate() {
+            let Ok(text) = page.text() else {
                 // A page whose text layer cannot be read is skipped rather than
                 // failing the whole search — one bad page should not make the
-                // other 400 unsearchable.
+                // other four hundred unsearchable.
                 continue;
             };
 
@@ -317,6 +325,7 @@ impl PdfiumRasterizer {
                             top: bounds.top().value,
                         }
                     })
+                    .filter(|rect| !rect.is_degenerate())
                     .collect();
 
                 if !rects.is_empty() {
@@ -330,21 +339,5 @@ impl PdfiumRasterizer {
         }
 
         Ok((hits, truncated))
-    }
-
-    /// Number of pages, without rendering anything.
-    pub fn page_count(
-        &self,
-        document: &[u8],
-        password: Option<&str>,
-    ) -> Result<usize, RenderError> {
-        let _guard = render_lock();
-
-        let document = self
-            .pdfium
-            .load_pdf_from_byte_slice(document, password)
-            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
-
-        Ok(usize::try_from(document.pages().len()).unwrap_or(0))
     }
 }

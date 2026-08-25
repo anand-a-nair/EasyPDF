@@ -20,7 +20,13 @@
         <button id="zoom-out" type="button" title="Zoom out">−</button>
         <span id="zoom-indicator">100%</span>
         <button id="zoom-in" type="button" title="Zoom in">+</button>
-        <button id="zoom-fit" type="button">Fit</button>
+        <button id="zoom-fit" type="button" title="Fit whole page">Fit</button>
+        <button id="zoom-fit-width" type="button" title="Fit page width">Width</button>
+      </div>
+
+      <div class="group" data-requires-document>
+        <button id="view-page" type="button" class="active" title="One page at a time">Page</button>
+        <button id="view-scroll" type="button" title="Continuous scrolling">Scroll</button>
       </div>
 
       <div class="group" data-requires-document>
@@ -40,10 +46,7 @@
         <p>Open a PDF to get started. Nothing leaves this machine.</p>
         <button id="open-empty" type="button" class="primary">Open a PDF…</button>
       </div>
-      <div id="page-stack" hidden>
-        <canvas id="page"></canvas>
-        <canvas id="highlights"></canvas>
-      </div>
+      <div id="pages" hidden></div>
     </main>
 
     <div id="error" role="alert" hidden></div>

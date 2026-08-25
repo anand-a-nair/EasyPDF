@@ -118,37 +118,70 @@ button.primary {
 
 #viewport {
   flex: 1 1 auto;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: auto;
   display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding: 2rem;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px;
+  /* Keeps a fast scroll from repainting the toolbar too. */
+  contain: paint;
 }
 
-/* The page and its highlight overlay are stacked so highlights can be redrawn
-   without repainting the page, and vice versa. */
-#page-stack {
+/* Pages are laid out in a column; page mode simply has one of them. */
+#pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Each slot keeps its size whether or not it currently holds pixels, so pages
+   finishing a render never shove the ones below them and jump the scroll. */
+.page-slot {
   position: relative;
-  line-height: 0;
-  box-shadow: 0 2px 12px var(--page-shadow);
-}
-
-#page {
+  flex: 0 0 auto;
   background: #ffffff;
-  /* The canvas is sized in CSS pixels while its backing store is sized in
-     device pixels, so pages stay sharp on retina displays. */
-  max-width: none;
+  box-shadow: 0 2px 12px var(--page-shadow);
+  line-height: 0;
 }
 
-#highlights {
+.page-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.page-highlights {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-#page.loading { opacity: 0.55; }
+button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
 
-body.has-document #empty-state { display: none; }
+#search-input {
+  width: 12rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+
+#search-count {
+  min-width: 5.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+#empty-state { display: none; }
 
 #search-input {
   width: 14rem;

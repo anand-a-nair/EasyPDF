@@ -25,13 +25,15 @@ use std::path::PathBuf;
 use easypdf_ffi::framing::{FrameError, read_frame, write_frame};
 use easypdf_ffi::protocol::{Request, Response, SandboxStatus, WorkerError};
 use easypdf_render::cache::{TileKey, ZoomBucket};
-use easypdf_render::pdfium::PdfiumRasterizer;
+use easypdf_render::pdfium::{OpenDocument, PdfiumRasterizer};
 
 /// Worker state: the loaded engine and the document currently open.
+///
+/// The document is held **parsed**, not as bytes. Re-parsing per request was
+/// costing a full document parse for every page render, size query and search.
 struct Session {
     rasterizer: Option<PdfiumRasterizer>,
-    document: Option<Vec<u8>>,
-    password: Option<String>,
+    document: Option<OpenDocument>,
 }
 
 /// Where the vendored PDFium library lives, relative to this executable.
@@ -94,7 +96,7 @@ fn main() {
         selftest::run_and_exit();
     }
 
-    let mut session = Session { rasterizer, document: None, password: None };
+    let mut session = Session { rasterizer, document: None };
 
     let mut stdin = BufReader::new(io::stdin());
     let mut stdout = BufWriter::new(io::stdout());
@@ -135,14 +137,18 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
                 return Response::Failed(engine_missing());
             };
 
-            match rasterizer.page_count(data, password.as_deref()) {
-                Ok(page_count) => {
-                    session.document = Some(data.clone());
-                    session.password = password.clone();
+            // Drop any previous document first so its memory is released
+            // before the next one is parsed, rather than holding both.
+            session.document = None;
+
+            match rasterizer.open(data.clone(), password.as_deref()) {
+                Ok(document) => {
+                    let page_count = document.page_count();
+                    session.document = Some(document);
                     Response::DocumentOpened {
                         page_count,
-                        // Reported honestly as unknown for now: distinguishing
-                        // these requires reading the document's encryption
+                        // Reported honestly as approximate for now: telling
+                        // these apart properly means reading the encryption
                         // dictionary and signature fields, which arrives with
                         // easypdf-crypto in Phase 3.
                         encrypted: password.is_some(),
@@ -154,17 +160,14 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
         }
 
         Request::RenderPage { page, zoom, rotation } => {
-            let Some(rasterizer) = session.rasterizer.as_ref() else {
-                return Response::Failed(engine_missing());
-            };
             let Some(document) = session.document.as_ref() else {
-                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+                return Response::Failed(no_document());
             };
 
             let key =
                 TileKey { page: *page, zoom: ZoomBucket::from_zoom(*zoom), rotation: *rotation };
 
-            match rasterizer.render(document, session.password.as_deref(), key) {
+            match document.render(key) {
                 Ok(tile) => Response::PageRendered {
                     width: tile.width,
                     height: tile.height,
@@ -175,42 +178,33 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
         }
 
         Request::PageSize { page } => {
-            let Some(rasterizer) = session.rasterizer.as_ref() else {
-                return Response::Failed(engine_missing());
-            };
             let Some(document) = session.document.as_ref() else {
-                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+                return Response::Failed(no_document());
             };
 
-            match rasterizer.page_size(document, session.password.as_deref(), *page) {
+            match document.page_size(*page) {
                 Ok((width, height)) => Response::PageSize { width, height },
                 Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
             }
         }
 
         Request::ExtractText { page } => {
-            let Some(rasterizer) = session.rasterizer.as_ref() else {
-                return Response::Failed(engine_missing());
-            };
             let Some(document) = session.document.as_ref() else {
-                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+                return Response::Failed(no_document());
             };
 
-            match rasterizer.extract_text(document, session.password.as_deref(), *page) {
+            match document.extract_text(*page) {
                 Ok(text) => Response::TextExtracted { text },
                 Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
             }
         }
 
         Request::Search { query, match_case } => {
-            let Some(rasterizer) = session.rasterizer.as_ref() else {
-                return Response::Failed(engine_missing());
-            };
             let Some(document) = session.document.as_ref() else {
-                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+                return Response::Failed(no_document());
             };
 
-            match rasterizer.search(document, session.password.as_deref(), query, *match_case) {
+            match document.search(query, *match_case) {
                 Ok((hits, truncated)) => Response::SearchResults { hits, truncated },
                 Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
             }
@@ -218,7 +212,6 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
 
         Request::CloseDocument => {
             session.document = None;
-            session.password = None;
             Response::Ok
         }
 
@@ -232,6 +225,12 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
             "request not understood by this worker version: {unknown:?}"
         ))),
     }
+}
+
+/// No document is open. Distinct from a malformed one: this is a caller bug,
+/// not a bad file.
+fn no_document() -> WorkerError {
+    WorkerError::Malformed("no document is open".to_owned())
 }
 
 /// The engine failed to load. Never falls back to in-process parsing (D-017).

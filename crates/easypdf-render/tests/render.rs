@@ -38,6 +38,11 @@ fn rasterizer() -> Option<PdfiumRasterizer> {
     )
 }
 
+/// Opens a corpus document, parsed once.
+fn open(rasterizer: &PdfiumRasterizer, name: &str) -> easypdf_render::pdfium::OpenDocument {
+    rasterizer.open(corpus(name), None).expect("corpus document should open")
+}
+
 fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(repo_root().join("tests/corpus").join(name))
         .unwrap_or_else(|error| panic!("missing corpus file {name}: {error}"))
@@ -62,7 +67,7 @@ macro_rules! rasterizer_or_skip {
 #[test]
 fn renders_a_page_to_pixels() {
     let rasterizer = rasterizer_or_skip!();
-    let tile = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 1.0)).unwrap();
+    let tile = open(&rasterizer, "minimal.pdf").render(key(0, 1.0)).unwrap();
 
     // The fixture is 200x100 points at zoom 1.0.
     assert_eq!(tile.width, 200);
@@ -75,7 +80,7 @@ fn rendered_page_is_not_blank() {
     // A renderer that returns a correctly sized field of white pixels passes
     // every dimension check while being completely broken.
     let rasterizer = rasterizer_or_skip!();
-    let tile = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 1.0)).unwrap();
+    let tile = open(&rasterizer, "minimal.pdf").render(key(0, 1.0)).unwrap();
 
     let distinct: std::collections::HashSet<_> = tile.pixels.as_chunks::<4>().0.iter().collect();
     assert!(
@@ -90,8 +95,8 @@ fn rendered_page_is_not_blank() {
 #[test]
 fn zoom_scales_the_output() {
     let rasterizer = rasterizer_or_skip!();
-    let small = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 1.0)).unwrap();
-    let large = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 2.0)).unwrap();
+    let small = open(&rasterizer, "minimal.pdf").render(key(0, 1.0)).unwrap();
+    let large = open(&rasterizer, "minimal.pdf").render(key(0, 2.0)).unwrap();
 
     assert_eq!(large.width, small.width * 2);
     assert_eq!(large.height, small.height * 2);
@@ -100,7 +105,7 @@ fn zoom_scales_the_output() {
 #[test]
 fn page_dimensions_follow_the_document_not_a_default() {
     let rasterizer = rasterizer_or_skip!();
-    let wide = rasterizer.render(&corpus("wide.pdf"), None, key(0, 1.0)).unwrap();
+    let wide = open(&rasterizer, "wide.pdf").render(key(0, 1.0)).unwrap();
 
     assert_eq!(wide.width, 400);
     assert_eq!(wide.height, 100);
@@ -109,13 +114,13 @@ fn page_dimensions_follow_the_document_not_a_default() {
 #[test]
 fn page_count_is_reported_without_rendering() {
     let rasterizer = rasterizer_or_skip!();
-    assert_eq!(rasterizer.page_count(&corpus("minimal.pdf"), None).unwrap(), 1);
+    assert_eq!(open(&rasterizer, "minimal.pdf").page_count(), 1);
 }
 
 #[test]
 fn out_of_range_page_is_refused_with_both_numbers() {
     let rasterizer = rasterizer_or_skip!();
-    let error = rasterizer.render(&corpus("minimal.pdf"), None, key(99, 1.0)).unwrap_err();
+    let error = open(&rasterizer, "minimal.pdf").render(key(99, 1.0)).unwrap_err();
 
     match error {
         RenderError::PageOutOfRange { requested, total } => {
@@ -129,8 +134,8 @@ fn out_of_range_page_is_refused_with_both_numbers() {
 #[test]
 fn non_pdf_input_is_rejected_not_guessed() {
     let rasterizer = rasterizer_or_skip!();
-    let result = rasterizer.render(&corpus("not-a-pdf.bin"), None, key(0, 1.0));
-    assert!(matches!(result, Err(RenderError::OpenFailed(_))), "{result:?}");
+    let result = rasterizer.open(corpus("not-a-pdf.bin"), None);
+    assert!(matches!(result, Err(RenderError::OpenFailed(_))), "expected refusal");
 }
 
 #[test]
@@ -138,14 +143,14 @@ fn truncated_document_fails_cleanly_without_panicking() {
     // Malformed input must produce an error, never a panic — a panic in the
     // worker is a denial-of-service vector. See ideas/07-security.md (T3).
     let rasterizer = rasterizer_or_skip!();
-    let result = rasterizer.render(&corpus("truncated.pdf"), None, key(0, 1.0));
-    assert!(result.is_err(), "truncated document should not render successfully");
+    let result = rasterizer.open(corpus("truncated.pdf"), None);
+    assert!(result.is_err(), "truncated document should not open successfully");
 }
 
 #[test]
 fn absurd_zoom_is_refused_rather_than_allocating() {
     let rasterizer = rasterizer_or_skip!();
-    let result = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 5000.0));
+    let result = open(&rasterizer, "minimal.pdf").render(key(0, 5000.0));
     assert!(
         matches!(result, Err(RenderError::ImplausibleDimensions { .. })),
         "expected a dimension refusal, got {result:?}"
@@ -168,8 +173,9 @@ fn concurrent_rendering_is_safe() {
             let dir = dir.clone();
             std::thread::spawn(move || {
                 let rasterizer = PdfiumRasterizer::load_from(&dir).unwrap();
-                let document = corpus(if index % 2 == 0 { "minimal.pdf" } else { "wide.pdf" });
-                rasterizer.render(&document, None, key(0, 1.0)).unwrap().width
+                let name = if index % 2 == 0 { "minimal.pdf" } else { "wide.pdf" };
+                let document = rasterizer.open(corpus(name), None).unwrap();
+                document.render(key(0, 1.0)).unwrap().width
             })
         })
         .collect();
@@ -191,7 +197,7 @@ fn rendered_page_survives_the_full_display_pipeline() {
     use easypdf_render::wire::{bgra_to_rgba, decode_page, encode_page};
 
     let rasterizer = rasterizer_or_skip!();
-    let tile = rasterizer.render(&corpus("minimal.pdf"), None, key(0, 1.0)).unwrap();
+    let tile = open(&rasterizer, "minimal.pdf").render(key(0, 1.0)).unwrap();
 
     let original = tile.pixels.clone();
     let rgba = bgra_to_rgba(tile.pixels);
@@ -225,21 +231,20 @@ fn rendered_page_survives_the_full_display_pipeline() {
 #[test]
 fn extracts_text_from_a_page() {
     let rasterizer = rasterizer_or_skip!();
-    let text = rasterizer.extract_text(&corpus("minimal.pdf"), None, 0).unwrap();
+    let text = open(&rasterizer, "minimal.pdf").extract_text(0).unwrap();
     assert!(text.contains("Hello EasyPDF"), "extracted {text:?}");
 }
 
 #[test]
 fn extraction_of_a_missing_page_is_refused() {
     let rasterizer = rasterizer_or_skip!();
-    assert!(rasterizer.extract_text(&corpus("minimal.pdf"), None, 42).is_err());
+    assert!(open(&rasterizer, "minimal.pdf").extract_text(42).is_err());
 }
 
 #[test]
 fn search_finds_text_and_reports_where_it_is() {
     let rasterizer = rasterizer_or_skip!();
-    let (hits, truncated) =
-        rasterizer.search(&corpus("minimal.pdf"), None, "EasyPDF", false).unwrap();
+    let (hits, truncated) = open(&rasterizer, "minimal.pdf").search("EasyPDF", false).unwrap();
 
     assert_eq!(hits.len(), 1, "expected one hit, got {hits:?}");
     assert_eq!(hits[0].page, 0);
@@ -256,20 +261,19 @@ fn search_finds_text_and_reports_where_it_is() {
 #[test]
 fn search_is_case_insensitive_by_default_and_exact_when_asked() {
     let rasterizer = rasterizer_or_skip!();
-    let document = corpus("minimal.pdf");
+    let document = open(&rasterizer, "minimal.pdf");
 
-    let (insensitive, _) = rasterizer.search(&document, None, "easypdf", false).unwrap();
+    let (insensitive, _) = document.search("easypdf", false).unwrap();
     assert_eq!(insensitive.len(), 1, "case-insensitive search should match");
 
-    let (sensitive, _) = rasterizer.search(&document, None, "easypdf", true).unwrap();
+    let (sensitive, _) = document.search("easypdf", true).unwrap();
     assert!(sensitive.is_empty(), "case-sensitive search should not match");
 }
 
 #[test]
 fn search_for_absent_text_returns_nothing() {
     let rasterizer = rasterizer_or_skip!();
-    let (hits, _) =
-        rasterizer.search(&corpus("minimal.pdf"), None, "zzzznotpresent", false).unwrap();
+    let (hits, _) = open(&rasterizer, "minimal.pdf").search("zzzznotpresent", false).unwrap();
     assert!(hits.is_empty());
 }
 
@@ -278,7 +282,7 @@ fn empty_query_returns_nothing_rather_than_everything() {
     // PDFium errors on an empty search string; returning "no results" is the
     // sane response to an empty search box.
     let rasterizer = rasterizer_or_skip!();
-    let (hits, _) = rasterizer.search(&corpus("minimal.pdf"), None, "", false).unwrap();
+    let (hits, _) = open(&rasterizer, "minimal.pdf").search("", false).unwrap();
     assert!(hits.is_empty());
 }
 
@@ -287,6 +291,6 @@ fn search_on_a_document_with_no_text_layer_does_not_fail() {
     // A page whose text cannot be read must be skipped, not fail the search:
     // one bad page should not make the rest of the document unsearchable.
     let rasterizer = rasterizer_or_skip!();
-    let result = rasterizer.search(&corpus("wide.pdf"), None, "nothing here", false);
+    let result = open(&rasterizer, "wide.pdf").search("nothing here", false);
     assert!(result.is_ok(), "{result:?}");
 }

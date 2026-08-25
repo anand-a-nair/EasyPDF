@@ -42,6 +42,9 @@ The canonical version is in [`.version`](.version).
 ### Notes
 - Page viewer: open a PDF, navigate pages, zoom, fit to window, with
   progressive rendering and a memory-bounded tile cache
+- Continuous scroll and page-at-a-time view modes, with only nearby pages held
+  in memory
+- Fit-to-page and fit-to-width that stay fitted when the window is resized
 - Full-document search with highlighted results, match stepping, and Cmd/Ctrl+F
 - Per-page text extraction
 - Toolbar badge showing whether the worker is actually sandboxed
