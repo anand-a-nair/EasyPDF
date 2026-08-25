@@ -217,13 +217,19 @@ async function zoomToFit(): Promise<void> {
 }
 
 async function openDocument(): Promise<void> {
-  const selected = await openFileDialog({
-    multiple: false,
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-  if (typeof selected !== "string") return;
-
+  // The dialog call must be inside the try as well. It was not, and when the
+  // capability grant was missing it rejected outside any handler: the click
+  // did nothing at all, with no message anywhere. A failure the user cannot
+  // see is worse than a crash.
   try {
+    const selected = await openFileDialog({
+      multiple: false,
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+
+    // Cancelling the dialog is not an error.
+    if (typeof selected !== "string") return;
+
     const info = await invoke<DocumentInfo>("open_document", { path: selected });
     state.document = info;
     state.page = 0;
@@ -261,6 +267,22 @@ async function showSandboxStatus(): Promise<void> {
   }
 }
 
+/**
+ * Surfaces anything that escapes a handler.
+ *
+ * Without this, a rejected promise from a `void`-ed call vanishes into the
+ * console — which, in a desktop app with no visible console, means the user
+ * sees a button that silently does nothing.
+ */
+function catchStrayFailures(): void {
+  window.addEventListener("unhandledrejection", (event) => {
+    showError(`Unexpected failure: ${String(event.reason)}`);
+  });
+  window.addEventListener("error", (event) => {
+    showError(`Unexpected error: ${event.message}`);
+  });
+}
+
 function wireUp(): void {
   element("open").addEventListener("click", () => void openDocument());
   element("open-empty").addEventListener("click", () => void openDocument());
@@ -293,6 +315,7 @@ function wireUp(): void {
   });
 }
 
+catchStrayFailures();
 wireUp();
 updateChrome();
 void showSandboxStatus();
