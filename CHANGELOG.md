@@ -39,6 +39,9 @@ The canonical version is in [`.version`](.version).
   advisory gate, binary size budget, version-consistency check
 - Nightly fuzzing workflow (placeholder until the parser exists)
 
+- Self-contained macOS application bundle: the sandboxed worker and the PDF
+  engine ship inside the package, verified end to end
+
 ### Notes
 - Page viewer: open a PDF, navigate pages, zoom, fit to window, with
   progressive rendering and a memory-bounded tile cache

@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run build && cargo build -p easypdf-worker",
-    "beforeBuildCommand": "npm run build && cargo build -p easypdf-worker --release"
+    "beforeBuildCommand": "npm run build && cargo build --release -p easypdf-worker && bash ../../scripts/prepare-bundle.sh release"
   },
   "app": {
     "windows": [
@@ -33,6 +33,12 @@
     "category": "Productivity",
     "copyright": "Copyright 2026 EasyPDF Contributors",
     "shortDescription": "A fast, local PDF tool.",
-    "longDescription": "View, edit, annotate, sign, and encrypt PDFs. No account, no cloud, no subscription."
+    "longDescription": "View, edit, annotate, sign, and encrypt PDFs. No account, no cloud, no subscription.",
+    "externalBin": [
+      "binaries/easypdf-worker"
+    ],
+    "resources": [
+      "resources/*"
+    ]
   }
 }

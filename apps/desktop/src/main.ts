@@ -70,6 +70,7 @@ interface WorkerStatus {
   readonly sandboxed: boolean;
   readonly detail: string;
   readonly memoryCapped: boolean;
+  readonly engineAvailable: boolean;
 }
 
 /** How the document is laid out. */
@@ -1139,6 +1140,18 @@ async function showSandboxStatus(): Promise<void> {
   const badge = element("sandbox-badge");
   try {
     const worker = await invoke<WorkerStatus>("worker_status");
+
+    // A worker with no engine can only refuse documents. That is a packaging
+    // fault and the user should hear about it before picking a file, not
+    // after — so it takes precedence over the confinement badge.
+    if (worker.running && !worker.engineAvailable) {
+      badge.textContent = "no PDF engine";
+      badge.title = "The PDF engine is missing from this build.";
+      badge.classList.add("warn");
+      showError("The PDF engine is missing from this build; documents cannot be opened.");
+      return;
+    }
+
     badge.textContent = worker.sandboxed ? "sandboxed" : "NOT sandboxed";
     badge.title = worker.detail;
     badge.classList.toggle("warn", !worker.sandboxed);

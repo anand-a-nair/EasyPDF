@@ -518,3 +518,31 @@ fn text_layout_without_a_document_is_refused() {
     let response = worker.request(&Request::TextLayout { page: 0 }).unwrap();
     assert!(matches!(response, Response::Failed(_)), "{response:?}");
 }
+
+#[test]
+fn a_missing_worker_binary_is_an_error_not_a_fallback() {
+    // D-017: if the worker cannot be started there is no in-process parsing
+    // fallback. Falling back would silently discard the whole security model
+    // at exactly the moment something is already wrong.
+    let missing = Path::new("/nonexistent/easypdf-worker-does-not-exist");
+    let result = Worker::spawn(missing);
+
+    assert!(result.is_err(), "spawning a missing worker must fail");
+    match result {
+        Err(WorkerError::Channel(message)) => {
+            assert!(message.contains("spawn"), "unhelpful message: {message}");
+        }
+        other => panic!("expected a channel error, got {other:?}"),
+    }
+}
+
+#[test]
+fn handshake_reports_whether_an_engine_is_present() {
+    // Surfaced at handshake so the host knows before the user picks a file.
+    let worker = spawn();
+    assert_eq!(
+        worker.engine_available(),
+        pdfium_available(),
+        "engine availability should match whether PDFium is vendored"
+    );
+}

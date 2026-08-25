@@ -230,6 +230,12 @@ pub enum Response {
         version: String,
         /// What confinement the worker managed to apply to itself.
         sandbox: SandboxStatus,
+        /// Whether the PDF engine loaded.
+        ///
+        /// False means the worker can only refuse every document. Reported at
+        /// handshake so the host knows before the user picks a file, rather
+        /// than after.
+        engine_available: bool,
     },
 
     /// The request completed with nothing to return.

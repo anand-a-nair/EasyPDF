@@ -92,6 +92,19 @@ project; a problem if it grows. Worth a search before investing in branding.
 
 ## OQ-008 — How does the worker binary ship alongside the app?
 
+**Answered 2026-08-25 for macOS.** The worker ships as a Tauri sidecar
+(`externalBin`) and PDFium as a bundled resource, staged by
+`scripts/prepare-bundle.sh`. Verified by driving the *bundled* worker over its
+real protocol: it reports `engine_available: true`, confines itself via
+seatbelt, opens a document and renders it. A bundle with the engine removed
+reports `engine_available: false` and refuses every document, with no fallback.
+
+Installer: **4.77 MB**, against a 15 MB budget.
+
+Windows and Linux bundles are configured and wired into CI but have never been
+built. The original framing follows.
+
+
 The app locates `easypdf-worker` beside its own executable. That works in
 development, where both land in `target/<profile>/`, but bundling is unsolved:
 Tauri's `externalBin` sidecar mechanism expects a target-triple naming

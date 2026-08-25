@@ -36,15 +36,22 @@ struct Session {
     document: Option<OpenDocument>,
 }
 
-/// Where the vendored PDFium library lives, relative to this executable.
+/// Where the PDFium library lives, relative to this executable.
 ///
-/// Loading it requires filesystem access, so it must happen **before** the
-/// sandbox is applied. That is not a hole in the model: a hash-pinned library
-/// loaded at startup is not untrusted input, and confinement still lands
-/// before the first document byte is read.
+/// Loading it needs filesystem access, so it happens **before** the sandbox is
+/// applied. That is not a hole in the model: a hash-pinned library loaded at
+/// startup is not untrusted input, and confinement still lands before the first
+/// document byte is read.
+///
+/// Two layouts have to work, and they are checked in a fixed order so a
+/// development build never silently picks up a stale bundled copy:
+///
+///   development  target/<profile>/  ->  repo root  ->  vendor/pdfium/<target>/lib
+///   bundled      the library sits beside the executable, or one level up in a
+///                platform resource directory (macOS: Contents/Resources)
 fn pdfium_directory() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?;
-    let target_dir = executable.parent()?;
+    let executable_dir = executable.parent()?;
 
     let target = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         "mac-arm64"
@@ -56,15 +63,34 @@ fn pdfium_directory() -> Option<PathBuf> {
         "linux-x64"
     };
 
-    // Development layout: target/<profile>/ -> repo root -> vendor/.
-    let repo_root = target_dir.parent()?.parent()?;
-    let vendored = repo_root.join("vendor/pdfium").join(target).join("lib");
-    if vendored.is_dir() {
-        return Some(vendored);
-    }
+    let library = if cfg!(target_os = "macos") {
+        "libpdfium.dylib"
+    } else if cfg!(target_os = "windows") {
+        "pdfium.dll"
+    } else {
+        "libpdfium.so"
+    };
 
-    // Bundled layout: the library sits beside the executable. See OQ-008.
-    Some(target_dir.to_path_buf())
+    let candidates = [
+        // Development: repo root is two levels above target/<profile>/.
+        executable_dir
+            .parent()
+            .and_then(std::path::Path::parent)
+            .map(|root| root.join("vendor/pdfium").join(target).join("lib")),
+        // Bundled: beside the executable.
+        Some(executable_dir.to_path_buf()),
+        // Bundled on macOS: Contents/MacOS/../Resources. Tauri preserves the
+        // staging directory name, so the library sits in a `resources`
+        // subdirectory rather than directly in Resources.
+        executable_dir.parent().map(|parent| parent.join("Resources/resources")),
+        executable_dir.parent().map(|parent| parent.join("Resources")),
+        // Bundled on Linux/Windows: a resources directory beside the binary.
+        Some(executable_dir.join("resources")),
+        // Bundled on Linux: alongside a lib/ sibling.
+        executable_dir.parent().map(|parent| parent.join("lib")),
+    ];
+
+    candidates.into_iter().flatten().find(|directory| directory.join(library).is_file())
 }
 
 fn main() {
@@ -130,6 +156,10 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
         Request::Handshake => Response::Ready {
             version: env!("CARGO_PKG_VERSION").to_owned(),
             sandbox: sandbox_status.clone(),
+            // Reported at handshake so the host knows before a user opens
+            // anything. A worker with no engine can only refuse, and finding
+            // that out at open time — after the file dialog — is worse.
+            engine_available: session.rasterizer.is_some(),
         },
 
         Request::OpenDocument { data, password } => {
@@ -260,6 +290,8 @@ fn no_document() -> WorkerError {
 /// The engine failed to load. Never falls back to in-process parsing (D-017).
 fn engine_missing() -> WorkerError {
     WorkerError::Unsupported(
-        "PDFium is not available to this worker; run scripts/fetch-pdfium.sh".to_owned(),
+        "the PDF engine is not available to this worker (missing from the \
+         installation, or scripts/fetch-pdfium.sh has not been run)"
+            .to_owned(),
     )
 }

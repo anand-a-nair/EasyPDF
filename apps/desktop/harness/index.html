@@ -54,7 +54,9 @@
           }
           switch (cmd) {
             case "worker_status":
-              return { running: true, sandboxed: true, detail: "confined via seatbelt", memoryCapped: false };
+              return { running: true, sandboxed: true, detail: "confined via seatbelt",
+                       memoryCapped: false,
+                       engineAvailable: window.__harness.engineAvailable !== false };
             case "plugin:dialog|open":
               return "/fake/example.pdf";
             case "text_layout": {

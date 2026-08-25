@@ -83,7 +83,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            bundle: app
+          - os: windows-latest
+            bundle: msi
+          - os: ubuntu-latest
+            bundle: deb
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -112,11 +118,22 @@ jobs:
 
       - run: cargo build --release --workspace
 
-      - name: Check binary size budget
+      # Bundling is what actually proves the app ships: the worker and the PDF
+      # engine have to end up inside the package, and a build that links fine
+      # can still produce an app that cannot open a document. See OQ-008.
+      - name: Build the application bundle
+        run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+        working-directory: apps/desktop
+
+      - name: Check size budgets
         if: matrix.os != 'windows-latest'
         run: bash scripts/check-size.sh
 
-      - name: Check binary size budget (Windows)
+      - name: Check size budgets (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
         run: bash scripts/check-size.sh target/release/easypdf-desktop.exe
+
+      - name: Verify the bundle is self-contained
+        if: matrix.os == 'macos-latest'
+        run: bash scripts/verify-bundle.sh

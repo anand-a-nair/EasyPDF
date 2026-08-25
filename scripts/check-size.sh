@@ -30,3 +30,36 @@ if (( size > BUDGET_BYTES )); then
 fi
 
 echo "PASS"
+
+# The installer is the number that actually matters to a user; the bare
+# executable above is only a proxy that can be checked without bundling.
+# Checked when present rather than required, because most builds do not bundle.
+INSTALLER_BUDGET_BYTES=$((15 * 1024 * 1024))
+
+installer=""
+for candidate in \
+    target/release/bundle/dmg/*.dmg \
+    target/release/bundle/msi/*.msi \
+    target/release/bundle/nsis/*.exe \
+    target/release/bundle/appimage/*.AppImage \
+    target/release/bundle/deb/*.deb
+do
+    [[ -f "$candidate" ]] && installer="$candidate" && break
+done
+
+if [[ -n "$installer" ]]; then
+    installer_size=$(wc -c < "$installer" | tr -d ' ')
+    printf '\ninstaller: %s\nsize:      %s bytes (%.2f MB)\nbudget:    %.2f MB\n' \
+        "$(basename "$installer")" "$installer_size" \
+        "$(echo "$installer_size" | awk '{print $1/1048576}')" \
+        "$(echo "$INSTALLER_BUDGET_BYTES" | awk '{print $1/1048576}')"
+
+    if (( installer_size > INSTALLER_BUDGET_BYTES )); then
+        echo "FAIL: installer over budget by $(( installer_size - INSTALLER_BUDGET_BYTES )) bytes" >&2
+        exit 1
+    fi
+    echo "PASS"
+else
+    echo ""
+    echo "note: no installer found; skipped the installer budget check"
+fi

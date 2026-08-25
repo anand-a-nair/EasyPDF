@@ -33,6 +33,8 @@ struct CoreStatus {
 struct WorkerStatus {
     running: bool,
     sandboxed: bool,
+    /// Whether the worker has a PDF engine. False is a packaging fault.
+    engine_available: bool,
     /// Human-readable detail: the mechanism, or why confinement is absent.
     detail: String,
     /// Whether a kernel-enforced memory ceiling is in place.
@@ -42,12 +44,31 @@ struct WorkerStatus {
     memory_capped: bool,
 }
 
-/// Locates the worker binary, which sits beside the app executable.
+/// Locates the worker binary.
+///
+/// In a bundle the worker is a Tauri sidecar and lands beside the app
+/// executable with the target triple stripped. In development it is in
+/// `target/<profile>/`, which is also beside the app executable — so one rule
+/// covers both, and the triple-suffixed name is checked as a fallback in case
+/// the bundler ever stops stripping it.
+///
+/// **There is deliberately no fallback to in-process parsing** if this returns
+/// nothing (D-017). A missing worker means no document, with a clear message —
+/// falling back would silently discard the entire security model at exactly
+/// the moment something is already wrong.
 fn worker_path() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?;
     let directory = executable.parent()?;
-    let name = if cfg!(windows) { "easypdf-worker.exe" } else { "easypdf-worker" };
-    Some(directory.join(name))
+
+    let extension = if cfg!(windows) { ".exe" } else { "" };
+    let triple = env!("EASYPDF_TARGET_TRIPLE");
+
+    let candidates = [
+        directory.join(format!("easypdf-worker{extension}")),
+        directory.join(format!("easypdf-worker-{triple}{extension}")),
+    ];
+
+    candidates.into_iter().find(|path| path.is_file())
 }
 
 /// Starts a worker, reports how well it confined itself, and shuts it down.
@@ -63,29 +84,34 @@ fn worker_status() -> WorkerStatus {
             sandboxed: false,
             detail: "could not locate the worker executable".to_owned(),
             memory_capped: false,
+            engine_available: false,
         };
     };
 
     match Worker::spawn(&path) {
         Ok(worker) => {
+            let engine_available = worker.engine_available();
             let status = match worker.sandbox() {
                 SandboxStatus::Enforced { mechanism, resource_limits } => WorkerStatus {
                     running: true,
                     sandboxed: true,
                     detail: format!("confined via {mechanism}"),
                     memory_capped: resource_limits.memory_capped(),
+                    engine_available,
                 },
                 SandboxStatus::NotEnforced { reason, resource_limits } => WorkerStatus {
                     running: true,
                     sandboxed: false,
                     detail: format!("UNCONFINED: {reason}"),
                     memory_capped: resource_limits.memory_capped(),
+                    engine_available,
                 },
                 other => WorkerStatus {
                     running: true,
                     sandboxed: false,
                     detail: format!("unrecognized sandbox status: {other:?}"),
                     memory_capped: false,
+                    engine_available,
                 },
             };
             worker.shutdown();
@@ -96,6 +122,7 @@ fn worker_status() -> WorkerStatus {
             sandboxed: false,
             detail: format!("worker failed to start: {error}"),
             memory_capped: false,
+            engine_available: false,
         },
     }
 }

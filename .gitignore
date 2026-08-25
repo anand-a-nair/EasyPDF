@@ -17,6 +17,11 @@ node_modules/
 # Vendored native deps (see ideas/08-open-questions.md, OQ-001)
 /vendor/pdfium/
 
+# Staged into the app bundle by scripts/prepare-bundle.sh — copies of build
+# output and of the vendored library, so not sources.
+/apps/desktop/src-tauri/binaries/
+/apps/desktop/src-tauri/resources/
+
 # Test corpus — large binaries, pinned by hash rather than committed
 /tests/corpus/large/
 

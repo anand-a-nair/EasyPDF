@@ -36,6 +36,7 @@ pub struct Worker {
     reader: Option<JoinHandle<()>>,
     executable: PathBuf,
     sandbox: SandboxStatus,
+    engine_available: bool,
     timeout: Duration,
 }
 
@@ -102,11 +103,12 @@ impl Worker {
                 reason: "handshake not yet completed".into(),
                 resource_limits: ResourceLimits::none(),
             },
+            engine_available: false,
             timeout,
         };
 
         match worker.request(&Request::Handshake)? {
-            Response::Ready { version, sandbox } => {
+            Response::Ready { version, sandbox, engine_available } => {
                 if version != env!("CARGO_PKG_VERSION") {
                     // A version mismatch means the protocol may differ. Refuse
                     // rather than guess.
@@ -117,6 +119,7 @@ impl Worker {
                     )));
                 }
                 worker.sandbox = sandbox;
+                worker.engine_available = engine_available;
                 Ok(worker)
             }
             other => {
@@ -130,6 +133,14 @@ impl Worker {
     #[must_use]
     pub fn sandbox(&self) -> &SandboxStatus {
         &self.sandbox
+    }
+
+    /// Whether the worker has a PDF engine.
+    ///
+    /// False means it can only refuse documents — usually a packaging fault.
+    #[must_use]
+    pub fn engine_available(&self) -> bool {
+        self.engine_available
     }
 
     /// The worker's process id.
