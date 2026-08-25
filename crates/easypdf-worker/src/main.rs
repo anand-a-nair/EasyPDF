@@ -155,6 +155,12 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
                         signed: false,
                     }
                 }
+                // A password problem is reported as itself, not as a malformed
+                // document: the two call for completely different responses
+                // from the user.
+                Err(easypdf_render::RenderError::PasswordRequired) => {
+                    Response::Failed(WorkerError::BadPassword)
+                }
                 Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
             }
         }
@@ -197,6 +203,13 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
                 Ok(text) => Response::TextExtracted { text },
                 Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
             }
+        }
+
+        Request::Outline => {
+            let Some(document) = session.document.as_ref() else {
+                return Response::Failed(no_document());
+            };
+            Response::Outline { entries: document.outline() }
         }
 
         Request::Search { query, match_case } => {

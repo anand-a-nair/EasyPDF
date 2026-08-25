@@ -42,6 +42,9 @@ The canonical version is in [`.version`](.version).
 ### Notes
 - Page viewer: open a PDF, navigate pages, zoom, fit to window, with
   progressive rendering and a memory-bounded tile cache
+- Password-protected documents, with retry on a wrong password
+- Page rotation
+- Document outline (bookmarks) navigation
 - Continuous scroll and page-at-a-time view modes, with only nearby pages held
   in memory
 - Fit-to-page and fit-to-width that stay fitted when the window is resized

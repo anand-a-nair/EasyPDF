@@ -24,7 +24,8 @@
       // denied permission. Regression cover for the capability bug: the app
       // once had no capability file at all, so the dialog call rejected and
       // the click did nothing visible whatsoever.
-      window.__harness = { calls: [], errors: [], failCommand: null, pageCount: 3 };
+      window.__harness = { calls: [], errors: [], failCommand: null, pageCount: 3,
+                           requirePassword: null, outline: [] };
       window.addEventListener("error", (e) => window.__harness.errors.push(String(e.message)));
 
       function fakePage(width, height) {
@@ -56,11 +57,28 @@
               return { running: true, sandboxed: true, detail: "confined via seatbelt", memoryCapped: false };
             case "plugin:dialog|open":
               return "/fake/example.pdf";
+            case "outline":
+              return window.__harness.outline;
             case "open_document":
+              // Simulates an encrypted document: rejects until the right
+              // password arrives, in the shape the Rust side actually sends.
+              if (window.__harness.requirePassword &&
+                  args.password !== window.__harness.requirePassword) {
+                throw { needsPassword: true, message: "This document is password protected." };
+              }
+              return { name: "example.pdf", pageCount: window.__harness.pageCount ?? 3, encrypted: !!window.__harness.requirePassword };
+            case "__unused_open_document":
               return { name: "example.pdf", pageCount: window.__harness.pageCount ?? 3, encrypted: false };
-            case "render_page":
-              return fakePage(Math.round(200 * args.zoom), Math.round(100 * args.zoom));
+            case "render_page": {
+              // Mirror the real renderer: a quarter turn swaps the axes.
+              // A stub that ignores rotation would let a broken rotation
+              // path pass its own test.
+              const quarter = args.rotation === 90 || args.rotation === 270;
+              const w = quarter ? 100 : 200, h = quarter ? 200 : 100;
+              return fakePage(Math.round(w * args.zoom), Math.round(h * args.zoom));
+            }
             case "page_size":
+              // Always unrotated, as the real command returns.
               return { width: 200, height: 100 };
             case "extract_text":
               return "Hello EasyPDF";
@@ -102,8 +120,13 @@
         <button id="zoom-fit-width" type="button">Width</button>
       </div>
       <div class="group" data-requires-document>
+        <button id="rotate-left" type="button">↺</button>
+        <button id="rotate-right" type="button">↻</button>
+      </div>
+      <div class="group" data-requires-document>
         <button id="view-page" type="button" class="active">Page</button>
         <button id="view-scroll" type="button">Scroll</button>
+        <button id="toggle-outline" type="button">Outline</button>
       </div>
       <div class="group" data-requires-document>
         <input id="search-input" type="search" placeholder="Find in document" />
@@ -114,14 +137,31 @@
       <span id="doc-name"></span>
       <span id="sandbox-badge"></span>
     </header>
-    <main id="viewport">
+    <div id="workspace">
+      <aside id="outline" hidden>
+        <h2>Outline</h2>
+        <ul id="outline-list"></ul>
+        <p id="outline-empty" hidden>This document has no outline.</p>
+      </aside>
+      <main id="viewport">
       <div id="empty-state">
         <h1>EasyPDF</h1>
         <p>Open a PDF to get started.</p>
         <button id="open-empty" type="button" class="primary">Open a PDF…</button>
       </div>
-      <div id="pages" hidden></div>
-    </main>
+        <div id="pages" hidden></div>
+      </main>
+    </div>
+    <dialog id="password-dialog">
+      <h2>Password required</h2>
+      <p id="password-message">This document is password protected.</p>
+      <input id="password-input" type="password" autocomplete="off"
+             placeholder="Document password" />
+      <div class="dialog-actions">
+        <button id="password-cancel" type="button">Cancel</button>
+        <button id="password-submit" type="button" class="primary">Open</button>
+      </div>
+    </dialog>
     <div id="error" role="alert" hidden></div>
     <script type="module" src="../dist/main.js"></script>
   </body>

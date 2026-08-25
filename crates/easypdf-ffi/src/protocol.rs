@@ -1,6 +1,6 @@
 //! Messages exchanged with the worker process.
 
-use easypdf_core::text::SearchHit;
+use easypdf_core::text::{OutlineEntry, SearchHit};
 use serde::{Deserialize, Serialize};
 
 /// Which kernel resource ceilings the worker managed to apply to itself.
@@ -128,6 +128,9 @@ pub enum Request {
         page: usize,
     },
 
+    /// Fetch the document outline (bookmarks).
+    Outline,
+
     /// Search the whole document.
     ///
     /// Done in the worker rather than by extracting text and searching on the
@@ -190,6 +193,12 @@ pub enum Response {
     TextExtracted {
         /// The page's text in reading order.
         text: String,
+    },
+
+    /// The document outline, flattened depth-first. Empty when there is none.
+    Outline {
+        /// Outline entries in document order.
+        entries: Vec<OutlineEntry>,
     },
 
     /// Search results.

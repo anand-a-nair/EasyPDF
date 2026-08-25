@@ -15,7 +15,7 @@ use easypdf_core::{Document, Page, PageSize, Rotation};
 use easypdf_ffi::protocol::SandboxStatus;
 use easypdf_ffi::worker::Worker;
 use serde::Serialize;
-use session::{DocumentInfo, Session};
+use session::{DocumentInfo, OpenError, Session};
 use tauri::State;
 use tauri::ipc::Response as IpcResponse;
 
@@ -106,8 +106,18 @@ fn worker_status() -> WorkerStatus {
 /// document content. The host reads the bytes; the worker is never told a
 /// filename (D-019).
 #[tauri::command]
-fn open_document(path: String, session: State<'_, Session>) -> Result<DocumentInfo, String> {
-    session.open(std::path::Path::new(&path))
+fn open_document(
+    path: String,
+    password: Option<String>,
+    session: State<'_, Session>,
+) -> Result<DocumentInfo, OpenError> {
+    session.open(std::path::Path::new(&path), password)
+}
+
+/// The document outline (bookmarks). Empty when the document has none.
+#[tauri::command]
+fn outline(session: State<'_, Session>) -> Result<Vec<easypdf_core::text::OutlineEntry>, String> {
+    session.outline()
 }
 
 /// Renders a page and returns raw pixels.
@@ -118,8 +128,13 @@ fn open_document(path: String, session: State<'_, Session>) -> Result<DocumentIn
 ///
 /// Layout: `u32` width, `u32` height, then RGBA bytes — both little-endian.
 #[tauri::command]
-fn render_page(page: usize, zoom: f32, session: State<'_, Session>) -> Result<IpcResponse, String> {
-    let rendered = session.render(page, zoom)?;
+fn render_page(
+    page: usize,
+    zoom: f32,
+    rotation: i32,
+    session: State<'_, Session>,
+) -> Result<IpcResponse, String> {
+    let rendered = session.render(page, zoom, rotation)?;
     Ok(IpcResponse::new(rendered.into_wire_format()))
 }
 
@@ -212,6 +227,7 @@ fn main() {
             page_size,
             extract_text,
             search,
+            outline,
             close_document,
             document_info
         ])

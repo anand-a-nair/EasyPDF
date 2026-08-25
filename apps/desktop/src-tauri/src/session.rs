@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use easypdf_core::text::SearchHit;
+use easypdf_core::text::{OutlineEntry, SearchHit};
 use easypdf_ffi::protocol::{Request, Response, WorkerError};
 use easypdf_ffi::worker::Worker;
 use easypdf_render::cache::{Tile, TileCache, TileKey, ZoomBucket};
@@ -33,6 +33,30 @@ pub(crate) struct DocumentInfo {
     pub encrypted: bool,
 }
 
+/// Why opening a document failed.
+///
+/// A password problem is its own variant rather than a string, because the UI
+/// has to respond to it completely differently: ask for a password, not report
+/// a broken file.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct OpenError {
+    /// True when the document needs a password, or the one given was wrong.
+    pub needs_password: bool,
+    /// Human-readable detail.
+    pub message: String,
+}
+
+impl OpenError {
+    fn failed(message: String) -> Self {
+        Self { needs_password: false, message }
+    }
+
+    fn password_required() -> Self {
+        Self { needs_password: true, message: "This document is password protected.".to_owned() }
+    }
+}
+
 /// A rendered page, ready for the canvas.
 pub(crate) struct RenderedPage {
     pub width: u32,
@@ -51,6 +75,8 @@ impl RenderedPage {
 struct OpenDocument {
     info: DocumentInfo,
     bytes: Vec<u8>,
+    /// Needed to reopen the document if the worker has to be restarted.
+    password: Option<String>,
 }
 
 /// The shell's document state.
@@ -76,16 +102,20 @@ impl Session {
     /// Opens a document from disk.
     ///
     /// The host reads the file; the worker never sees a path. See D-019.
-    pub(crate) fn open(&self, path: &Path) -> Result<DocumentInfo, String> {
-        let bytes = std::fs::read(path).map_err(|error| format!("could not read file: {error}"))?;
+    pub(crate) fn open(
+        &self,
+        path: &Path,
+        password: Option<String>,
+    ) -> Result<DocumentInfo, OpenError> {
+        let bytes = std::fs::read(path)
+            .map_err(|error| OpenError::failed(format!("could not read file: {error}")))?;
 
         let name = path
             .file_name()
             .map_or_else(|| "document.pdf".to_owned(), |n| n.to_string_lossy().into_owned());
 
-        let response = self
-            .send(&Request::OpenDocument { data: bytes.clone(), password: None })
-            .map_err(|error| error.to_string())?;
+        let request = Request::OpenDocument { data: bytes.clone(), password: password.clone() };
+        let response = self.send(&request).map_err(|e| OpenError::failed(e.to_string()))?;
 
         match response {
             Response::DocumentOpened { page_count, encrypted, .. } => {
@@ -93,20 +123,43 @@ impl Session {
 
                 // A new document invalidates every cached tile — they are keyed
                 // by page and zoom, not by document.
-                self.cache.lock().map_err(|_| "cache lock poisoned")?.clear();
-                *self.document.lock().map_err(|_| "document lock poisoned")? =
-                    Some(OpenDocument { info: info.clone(), bytes });
+                self.cache
+                    .lock()
+                    .map_err(|_| OpenError::failed("cache lock poisoned".to_owned()))?
+                    .clear();
+                *self
+                    .document
+                    .lock()
+                    .map_err(|_| OpenError::failed("document lock poisoned".to_owned()))? =
+                    Some(OpenDocument { info: info.clone(), bytes, password });
 
                 Ok(info)
             }
+            // Surfaced as its own kind so the UI can ask for a password rather
+            // than telling the user their file is broken.
+            Response::Failed(WorkerError::BadPassword) => Err(OpenError::password_required()),
+            Response::Failed(error) => Err(OpenError::failed(error.to_string())),
+            other => Err(OpenError::failed(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    /// The document outline (bookmarks), empty when there is none.
+    pub(crate) fn outline(&self) -> Result<Vec<OutlineEntry>, String> {
+        match self.send(&Request::Outline).map_err(|e| e.to_string())? {
+            Response::Outline { entries } => Ok(entries),
             Response::Failed(error) => Err(error.to_string()),
             other => Err(format!("unexpected response: {other:?}")),
         }
     }
 
     /// Renders a page, serving from cache when possible.
-    pub(crate) fn render(&self, page: usize, zoom: f32) -> Result<RenderedPage, String> {
-        let key = TileKey { page, zoom: ZoomBucket::from_zoom(zoom), rotation: 0 };
+    pub(crate) fn render(
+        &self,
+        page: usize,
+        zoom: f32,
+        rotation: i32,
+    ) -> Result<RenderedPage, String> {
+        let key = TileKey { page, zoom: ZoomBucket::from_zoom(zoom), rotation };
 
         if let Ok(mut cache) = self.cache.lock()
             && let Some(tile) = cache.get(&key)
@@ -119,7 +172,7 @@ impl Session {
         }
 
         let response = self
-            .send(&Request::RenderPage { page, zoom: key.zoom.zoom(), rotation: 0 })
+            .send(&Request::RenderPage { page, zoom: key.zoom.zoom(), rotation })
             .map_err(|error| error.to_string())?;
 
         match response {
@@ -211,14 +264,15 @@ impl Session {
 
                 let mut fresh = Worker::spawn(&self.worker_path)?;
 
-                let reopened = self
-                    .document
-                    .lock()
-                    .ok()
-                    .and_then(|guard| guard.as_ref().map(|d| d.bytes.clone()));
+                // The password must be carried across a restart too, or an
+                // encrypted document silently becomes inaccessible after one
+                // transient worker failure.
+                let reopened = self.document.lock().ok().and_then(|guard| {
+                    guard.as_ref().map(|d| (d.bytes.clone(), d.password.clone()))
+                });
 
-                if let Some(bytes) = reopened {
-                    let _ = fresh.request(&Request::OpenDocument { data: bytes, password: None });
+                if let Some((bytes, password)) = reopened {
+                    let _ = fresh.request(&Request::OpenDocument { data: bytes, password });
                 }
 
                 let result = fresh.request(request);

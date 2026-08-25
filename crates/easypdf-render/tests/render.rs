@@ -294,3 +294,93 @@ fn search_on_a_document_with_no_text_layer_does_not_fail() {
     let result = open(&rasterizer, "wide.pdf").search("nothing here", false);
     assert!(result.is_ok(), "{result:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Encryption, rotation, outline
+// ---------------------------------------------------------------------------
+
+#[test]
+fn encrypted_document_without_a_password_says_so_specifically() {
+    // "Needs a password" and "is damaged" call for completely different
+    // responses. Conflating them is how people conclude a good file is broken.
+    let rasterizer = rasterizer_or_skip!();
+    let result = rasterizer.open(corpus("encrypted.pdf"), None);
+    assert!(matches!(result, Err(RenderError::PasswordRequired)), "expected PasswordRequired");
+}
+
+#[test]
+fn encrypted_document_rejects_the_wrong_password() {
+    let rasterizer = rasterizer_or_skip!();
+    let result = rasterizer.open(corpus("encrypted.pdf"), Some("wrong"));
+    assert!(matches!(result, Err(RenderError::PasswordRequired)), "expected PasswordRequired");
+}
+
+#[test]
+fn encrypted_document_opens_and_renders_with_the_right_password() {
+    let rasterizer = rasterizer_or_skip!();
+    let document = rasterizer
+        .open(corpus("encrypted.pdf"), Some("secret"))
+        .expect("correct password should open the document");
+
+    assert_eq!(document.page_count(), 1);
+
+    // Decryption really happened: the text is readable and the page draws.
+    let text = document.extract_text(0).unwrap();
+    assert!(text.contains("Secret EasyPDF"), "extracted {text:?}");
+
+    let tile = document.render(key(0, 1.0)).unwrap();
+    let dark = tile.pixels.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
+    assert!(dark > 20, "decrypted page rendered blank: {dark} dark pixels");
+}
+
+#[test]
+fn quarter_turns_swap_the_rendered_dimensions() {
+    // Rotation was accepted by the protocol and silently ignored, so a rotated
+    // page came back in the unrotated aspect ratio.
+    let rasterizer = rasterizer_or_skip!();
+    let document = open(&rasterizer, "wide.pdf");
+
+    let upright = document
+        .render(TileKey { page: 0, zoom: ZoomBucket::from_zoom(1.0), rotation: 0 })
+        .unwrap();
+    assert_eq!((upright.width, upright.height), (400, 100));
+
+    let turned = document
+        .render(TileKey { page: 0, zoom: ZoomBucket::from_zoom(1.0), rotation: 90 })
+        .unwrap();
+    assert_eq!((turned.width, turned.height), (100, 400), "a quarter turn must swap the axes");
+}
+
+#[test]
+fn half_turn_keeps_dimensions_but_changes_pixels() {
+    let rasterizer = rasterizer_or_skip!();
+    let document = open(&rasterizer, "minimal.pdf");
+
+    let upright = document
+        .render(TileKey { page: 0, zoom: ZoomBucket::from_zoom(1.0), rotation: 0 })
+        .unwrap();
+    let flipped = document
+        .render(TileKey { page: 0, zoom: ZoomBucket::from_zoom(1.0), rotation: 180 })
+        .unwrap();
+
+    assert_eq!((upright.width, upright.height), (flipped.width, flipped.height));
+    assert_ne!(upright.pixels, flipped.pixels, "180 degrees should change the image");
+}
+
+#[test]
+fn nonsense_rotation_renders_upright_rather_than_failing() {
+    // A page shown the wrong way up is recoverable; a refusal to show it is not.
+    let rasterizer = rasterizer_or_skip!();
+    let document = open(&rasterizer, "minimal.pdf");
+    let tile = document
+        .render(TileKey { page: 0, zoom: ZoomBucket::from_zoom(1.0), rotation: 37 })
+        .unwrap();
+    assert_eq!((tile.width, tile.height), (200, 100));
+}
+
+#[test]
+fn a_document_without_an_outline_returns_an_empty_list() {
+    // Common, and not an error.
+    let rasterizer = rasterizer_or_skip!();
+    assert!(open(&rasterizer, "minimal.pdf").outline().is_empty());
+}

@@ -8,7 +8,9 @@ nobody can read is a fixture nobody can debug.
 Large real-world documents are pinned by hash instead, not committed — see
 ideas/04-performance-budget.md.
 """
+import hashlib
 import pathlib
+import struct
 
 
 def build_pdf(text: str, width: int = 200, height: int = 100) -> bytes:
@@ -63,6 +65,113 @@ def build_multipage(texts: list[str], width: int = 200, height: int = 100) -> by
     return bytes(out)
 
 
+# --- encryption -------------------------------------------------------------
+#
+# PDF's standard security handler, revision 2 (RC4, 40-bit). Implemented here
+# rather than pulled from a library so the corpus generator stays
+# dependency-free, matching the rest of these hand-built fixtures.
+#
+# RC4 is long broken, which is exactly why it makes a good *read* fixture:
+# EasyPDF must open legacy encrypted documents while refusing to create them.
+# See easypdf-crypto's Algorithm::can_write.
+
+PAD = bytes([
+    0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56,
+    0xFF, 0xFA, 0x01, 0x08, 0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80,
+    0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
+])
+
+
+def rc4(key: bytes, data: bytes) -> bytes:
+    state = list(range(256))
+    j = 0
+    for i in range(256):
+        j = (j + state[i] + key[i % len(key)]) % 256
+        state[i], state[j] = state[j], state[i]
+
+    out = bytearray()
+    i = j = 0
+    for byte in data:
+        i = (i + 1) % 256
+        j = (j + state[i]) % 256
+        state[i], state[j] = state[j], state[i]
+        out.append(byte ^ state[(state[i] + state[j]) % 256])
+    return bytes(out)
+
+
+def pad_password(password: str) -> bytes:
+    raw = password.encode("latin-1")[:32]
+    return raw + PAD[: 32 - len(raw)]
+
+
+def build_encrypted_pdf(text: str, user_password: str, doc_id: bytes) -> bytes:
+    """Builds a single-page RC4-40 encrypted document."""
+    permissions = -1  # everything allowed; the flags are advisory anyway
+    key_length = 5    # 40 bits
+
+    owner_entry = rc4(
+        hashlib.md5(pad_password(user_password)).digest()[:key_length],
+        pad_password(user_password),
+    )
+
+    key_input = (
+        pad_password(user_password)
+        + owner_entry
+        + struct.pack("<i", permissions)
+        + doc_id
+    )
+    encryption_key = hashlib.md5(key_input).digest()[:key_length]
+    user_entry = rc4(encryption_key, PAD)
+
+    def object_key(number: int, generation: int = 0) -> bytes:
+        extended = (
+            encryption_key
+            + struct.pack("<I", number)[:3]
+            + struct.pack("<I", generation)[:2]
+        )
+        return hashlib.md5(extended).digest()[: min(len(encryption_key) + 5, 16)]
+
+    content = f"BT /F1 24 Tf 20 40 Td ({text}) Tj ET".encode("ascii")
+    encrypted_content = rc4(object_key(5), content)
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        (
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] "
+            "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>"
+        ).encode("ascii"),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length " + str(len(encrypted_content)).encode() + b" >>\nstream\n"
+        + encrypted_content + b"\nendstream",
+        (
+            b"<< /Filter /Standard /V 1 /R 2 /Length 40 /P " + str(permissions).encode()
+            + b" /O <" + owner_entry.hex().encode() + b">"
+            + b" /U <" + user_entry.hex().encode() + b"> >>"
+        ),
+    ]
+
+    out = bytearray(b"%PDF-1.7\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode("ascii") + body + b"\nendobj\n"
+
+    xref_at = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode("ascii")
+    out += b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode("ascii")
+
+    identifier = doc_id.hex()
+    out += (
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R /Encrypt 6 0 R "
+        f"/ID [<{identifier}> <{identifier}>] >>\n"
+        f"startxref\n{xref_at}\n%%EOF\n"
+    ).encode("ascii")
+    return bytes(out)
+
+
 def main() -> None:
     corpus = pathlib.Path(__file__).parent.parent / "tests" / "corpus"
     corpus.mkdir(parents=True, exist_ok=True)
@@ -84,6 +193,11 @@ def main() -> None:
     # identity is checkable.
     (corpus / "many-pages.pdf").write_bytes(
         build_multipage([f"Page {n + 1} of 200" for n in range(200)])
+    )
+    # Encrypted with the user password "secret". Byte-stable because the
+    # document ID is fixed rather than random.
+    (corpus / "encrypted.pdf").write_bytes(
+        build_encrypted_pdf("Secret EasyPDF", "secret", bytes(range(16)))
     )
 
     for path in sorted(corpus.iterdir()):

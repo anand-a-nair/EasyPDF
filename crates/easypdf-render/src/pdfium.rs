@@ -19,10 +19,11 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use pdfium_render::prelude::{
-    PdfDocument, PdfRenderConfig, PdfSearchDirection, PdfSearchOptions, Pdfium,
+    PdfDocument, PdfPageRenderRotation, PdfRenderConfig, PdfSearchDirection, PdfSearchOptions,
+    Pdfium, PdfiumError, PdfiumInternalError,
 };
 
-use easypdf_core::text::{SearchHit, TextRect};
+use easypdf_core::text::{OutlineEntry, SearchHit, TextRect};
 
 use crate::cache::{Tile, TileKey};
 
@@ -79,6 +80,15 @@ pub enum RenderError {
     #[error("could not open document: {0}")]
     OpenFailed(String),
 
+    /// The document is encrypted and the supplied password was wrong or absent.
+    ///
+    /// Distinct from [`RenderError::OpenFailed`] on purpose: "this file is
+    /// damaged" and "this file needs a password" call for completely different
+    /// responses from the user, and conflating them is how people conclude a
+    /// perfectly good document is broken.
+    #[error("document is encrypted and requires a password")]
+    PasswordRequired,
+
     /// A page could not be rendered.
     #[error("could not render page {page}: {reason}")]
     PageFailed {
@@ -113,6 +123,13 @@ pub enum RenderError {
 /// Returning them all would stall the UI and blow the frame limit, and nobody
 /// steps through 40,000 results. The caller is told the count was capped.
 pub const MAX_SEARCH_HITS: usize = 500;
+
+/// Largest number of outline entries collected from one document.
+///
+/// PDF outlines are a linked structure and **can contain cycles**, whether by
+/// corruption or by design. A budget is the simplest defence that cannot be
+/// defeated by a malformed file; without it, a hostile outline hangs the worker.
+pub const MAX_OUTLINE_ENTRIES: usize = 5_000;
 
 /// Largest bitmap edge the renderer will produce, in pixels.
 ///
@@ -173,10 +190,16 @@ impl PdfiumRasterizer {
     ) -> Result<OpenDocument, RenderError> {
         let _guard = render_lock();
 
-        let document = self
-            .pdfium
-            .load_pdf_from_byte_vec(bytes, password)
-            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
+        let document = self.pdfium.load_pdf_from_byte_vec(bytes, password).map_err(|error| {
+            if matches!(
+                error,
+                PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
+            ) {
+                RenderError::PasswordRequired
+            } else {
+                RenderError::OpenFailed(error.to_string())
+            }
+        })?;
 
         Ok(OpenDocument { document })
     }
@@ -237,14 +260,28 @@ impl OpenDocument {
         })?;
 
         let zoom = key.zoom.zoom();
-        let width = (page.width().value * zoom).round() as i32;
-        let height = (page.height().value * zoom).round() as i32;
+        let rotation = render_rotation(key.rotation);
+
+        // A quarter turn swaps the axes, so the target bitmap has to swap too —
+        // otherwise a rotated page is squashed into the unrotated aspect ratio.
+        let quarter_turn = matches!(
+            rotation,
+            PdfPageRenderRotation::Degrees90 | PdfPageRenderRotation::Degrees270
+        );
+        let (page_width, page_height) = if quarter_turn {
+            (page.height().value, page.width().value)
+        } else {
+            (page.width().value, page.height().value)
+        };
+
+        let width = (page_width * zoom).round() as i32;
+        let height = (page_height * zoom).round() as i32;
 
         if width <= 0 || height <= 0 || width > MAX_BITMAP_EDGE || height > MAX_BITMAP_EDGE {
             return Err(RenderError::ImplausibleDimensions { width, height });
         }
 
-        let config = PdfRenderConfig::new().set_target_size(width, height);
+        let config = PdfRenderConfig::new().set_target_size(width, height).rotate(rotation, false);
 
         let bitmap = page.render_with_config(&config).map_err(|error| RenderError::PageFailed {
             page: key.page,
@@ -256,6 +293,24 @@ impl OpenDocument {
             height: u32::try_from(bitmap.height()).unwrap_or(0),
             pixels: bitmap.as_raw_bytes(),
         })
+    }
+
+    /// The document's outline (bookmarks), flattened depth-first.
+    ///
+    /// Returns an empty list when the document has no outline, which is common
+    /// and not an error.
+    pub fn outline(&self) -> Vec<OutlineEntry> {
+        let _guard = render_lock();
+
+        let bookmarks = self.document.bookmarks();
+        let Some(root) = bookmarks.root() else {
+            return Vec::new();
+        };
+
+        let mut entries = Vec::new();
+        let mut budget = MAX_OUTLINE_ENTRIES;
+        collect_outline(&root, 0, &mut entries, &mut budget);
+        entries
     }
 
     /// Extracts a page's text in reading order.
@@ -339,5 +394,47 @@ impl OpenDocument {
         }
 
         Ok((hits, truncated))
+    }
+}
+
+/// Maps a rotation in degrees onto PDFium's enum.
+///
+/// Anything that is not a right angle renders unrotated rather than failing:
+/// a page displayed the wrong way up is recoverable, a refusal to display it
+/// is not.
+fn render_rotation(degrees: i32) -> PdfPageRenderRotation {
+    match degrees.rem_euclid(360) {
+        90 => PdfPageRenderRotation::Degrees90,
+        180 => PdfPageRenderRotation::Degrees180,
+        270 => PdfPageRenderRotation::Degrees270,
+        _ => PdfPageRenderRotation::None,
+    }
+}
+
+/// Walks the outline depth-first, spending from a shared budget.
+fn collect_outline(
+    bookmark: &pdfium_render::prelude::PdfBookmark<'_>,
+    depth: u32,
+    entries: &mut Vec<OutlineEntry>,
+    budget: &mut usize,
+) {
+    for sibling in bookmark.iter_siblings() {
+        if *budget == 0 {
+            return;
+        }
+        *budget -= 1;
+
+        entries.push(OutlineEntry {
+            title: sibling.title().unwrap_or_default(),
+            depth,
+            page: sibling
+                .destination()
+                .and_then(|destination| destination.page_index().ok())
+                .and_then(|index| usize::try_from(index).ok()),
+        });
+
+        if let Some(child) = sibling.first_child() {
+            collect_outline(&child, depth + 1, entries, budget);
+        }
     }
 }

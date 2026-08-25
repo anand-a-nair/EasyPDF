@@ -25,8 +25,14 @@
       </div>
 
       <div class="group" data-requires-document>
+        <button id="rotate-left" type="button" title="Rotate left">↺</button>
+        <button id="rotate-right" type="button" title="Rotate right">↻</button>
+      </div>
+
+      <div class="group" data-requires-document>
         <button id="view-page" type="button" class="active" title="One page at a time">Page</button>
         <button id="view-scroll" type="button" title="Continuous scrolling">Scroll</button>
+        <button id="toggle-outline" type="button" title="Show outline">Outline</button>
       </div>
 
       <div class="group" data-requires-document>
@@ -40,14 +46,33 @@
       <span id="sandbox-badge" title="Worker confinement status"></span>
     </header>
 
-    <main id="viewport">
+    <div id="workspace">
+      <aside id="outline" hidden>
+        <h2>Outline</h2>
+        <ul id="outline-list"></ul>
+        <p id="outline-empty" hidden>This document has no outline.</p>
+      </aside>
+
+      <main id="viewport">
       <div id="empty-state">
         <h1>EasyPDF</h1>
         <p>Open a PDF to get started. Nothing leaves this machine.</p>
         <button id="open-empty" type="button" class="primary">Open a PDF…</button>
       </div>
-      <div id="pages" hidden></div>
-    </main>
+        <div id="pages" hidden></div>
+      </main>
+    </div>
+
+    <dialog id="password-dialog">
+      <h2>Password required</h2>
+      <p id="password-message">This document is password protected.</p>
+      <input id="password-input" type="password" autocomplete="off"
+             placeholder="Document password" />
+      <div class="dialog-actions">
+        <button id="password-cancel" type="button">Cancel</button>
+        <button id="password-submit" type="button" class="primary">Open</button>
+      </div>
+    </dialog>
 
     <div id="error" role="alert" hidden></div>
 

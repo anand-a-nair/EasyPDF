@@ -88,3 +88,24 @@ mod tests {
         assert!(inverted.is_degenerate());
     }
 }
+
+/// One entry in a document's outline (its bookmarks).
+///
+/// Flattened rather than nested, carrying an explicit `depth`. A tree would be
+/// more faithful to the file, but the UI renders a list and a recursive
+/// structure across the worker boundary buys nothing but serialisation
+/// complexity — and PDF outlines can contain cycles, which a flat walk with a
+/// visit budget handles safely.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OutlineEntry {
+    /// Entry title as shown to the user.
+    pub title: String,
+    /// Nesting depth, zero for top-level entries.
+    pub depth: u32,
+    /// Destination page, if the entry resolves to one.
+    ///
+    /// `None` for entries whose action is not a simple page jump — those are
+    /// shown but not clickable, rather than silently sending the user to
+    /// page 1.
+    pub page: Option<usize>,
+}

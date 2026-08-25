@@ -395,3 +395,93 @@ fn search_survives_a_query_that_matches_nothing() {
     // Worker stays healthy.
     assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
 }
+
+#[test]
+fn encrypted_document_reports_a_password_problem_as_itself() {
+    // Not as a malformed document: the UI has to ask for a password, not tell
+    // the user their file is broken.
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let request = Request::OpenDocument { data: corpus("encrypted.pdf"), password: None };
+    match worker.request(&request).unwrap() {
+        Response::Failed(WorkerError::BadPassword) => {}
+        other => panic!("expected BadPassword, got {other:?}"),
+    }
+}
+
+#[test]
+fn encrypted_document_opens_with_the_right_password_inside_the_sandbox() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let request = Request::OpenDocument {
+        data: corpus("encrypted.pdf"),
+        password: Some("secret".to_owned()),
+    };
+    match worker.request(&request).unwrap() {
+        Response::DocumentOpened { page_count, .. } => assert_eq!(page_count, 1),
+        other => panic!("expected DocumentOpened, got {other:?}"),
+    }
+
+    // Decryption really happened.
+    match worker.request(&Request::ExtractText { page: 0 }).unwrap() {
+        Response::TextExtracted { text } => assert!(text.contains("Secret EasyPDF"), "{text:?}"),
+        other => panic!("expected TextExtracted, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_wrong_password_does_not_kill_the_worker() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let request =
+        Request::OpenDocument { data: corpus("encrypted.pdf"), password: Some("wrong".to_owned()) };
+    assert!(matches!(
+        worker.request(&request).unwrap(),
+        Response::Failed(WorkerError::BadPassword)
+    ));
+
+    // The same worker must still accept the correct password afterwards.
+    let retry = Request::OpenDocument {
+        data: corpus("encrypted.pdf"),
+        password: Some("secret".to_owned()),
+    };
+    assert!(matches!(worker.request(&retry).unwrap(), Response::DocumentOpened { .. }));
+}
+
+#[test]
+fn outline_of_a_document_without_one_is_empty_not_an_error() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    match worker.request(&Request::Outline).unwrap() {
+        Response::Outline { entries } => assert!(entries.is_empty()),
+        other => panic!("expected Outline, got {other:?}"),
+    }
+}
+
+#[test]
+fn rotation_reaches_the_renderer_through_the_boundary() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("wide.pdf"), password: None }).unwrap();
+
+    let upright = worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 0 }).unwrap();
+    let turned = worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 90 }).unwrap();
+
+    match (upright, turned) {
+        (
+            Response::PageRendered { width: uw, height: uh, .. },
+            Response::PageRendered { width: tw, height: th, .. },
+        ) => {
+            assert_eq!((uw, uh), (400, 100));
+            assert_eq!((tw, th), (100, 400), "rotation must survive the boundary");
+        }
+        other => panic!("expected two rendered pages, got {other:?}"),
+    }
+}

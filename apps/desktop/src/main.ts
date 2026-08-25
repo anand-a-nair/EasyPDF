@@ -43,6 +43,18 @@ interface SearchResults {
   readonly truncated: boolean;
 }
 
+interface OutlineEntry {
+  readonly title: string;
+  readonly depth: number;
+  readonly page: number | null;
+}
+
+/** Shape of the error `open_document` rejects with. */
+interface OpenError {
+  readonly needsPassword: boolean;
+  readonly message: string;
+}
+
 interface WorkerStatus {
   readonly running: boolean;
   readonly sandboxed: boolean;
@@ -105,6 +117,9 @@ const state = {
   /** Invalidates in-flight renders when the view changes underneath them. */
   generation: 0,
   pageSizes: new Map<number, PageDimensions>(),
+  /** Display rotation in degrees clockwise, applied to every page. */
+  rotation: 0,
+  outline: [] as readonly OutlineEntry[],
   slots: new Map<number, Slot>(),
   search: {
     query: "",
@@ -159,10 +174,10 @@ async function pageSize(page: number): Promise<PageDimensions> {
  * corrected as real sizes arrive.
  */
 function estimatedSize(page: number): PageDimensions {
-  return (
+  const known =
     state.pageSizes.get(page) ??
-    state.pageSizes.values().next().value ?? { width: 612, height: 792 }
-  );
+    state.pageSizes.values().next().value ?? { width: 612, height: 792 };
+  return displayedSize(known);
 }
 
 // --- slots -----------------------------------------------------------------
@@ -237,7 +252,13 @@ function buildSlots(): void {
 // --- rendering -------------------------------------------------------------
 
 function renderKey(page: number): string {
-  return `${page}@${(state.zoom * window.devicePixelRatio).toFixed(3)}`;
+  return `${page}@${(state.zoom * window.devicePixelRatio).toFixed(3)}r${state.rotation}`;
+}
+
+/** Page dimensions as displayed, accounting for rotation. */
+function displayedSize(size: PageDimensions): PageDimensions {
+  const quarterTurn = state.rotation === 90 || state.rotation === 270;
+  return quarterTurn ? { width: size.height, height: size.width } : size;
 }
 
 /** Decodes a render response: u32 width, u32 height, then RGBA bytes. */
@@ -307,7 +328,7 @@ async function renderSlot(page: number, generation: number): Promise<void> {
   const deviceZoom = state.zoom * window.devicePixelRatio;
 
   try {
-    const size = await pageSize(page);
+    const size = displayedSize(await pageSize(page));
     if (generation !== state.generation) return;
 
     const cssWidth = Math.round(size.width * state.zoom);
@@ -322,12 +343,17 @@ async function renderSlot(page: number, generation: number): Promise<void> {
       const preview = await invoke<ArrayBuffer>("render_page", {
         page,
         zoom: Math.max(deviceZoom * PREVIEW_SCALE, 0.05),
+        rotation: state.rotation,
       });
       if (generation !== state.generation) return;
       paintSlot(slot, decodePage(preview), cssWidth, cssHeight);
     }
 
-    const full = await invoke<ArrayBuffer>("render_page", { page, zoom: deviceZoom });
+    const full = await invoke<ArrayBuffer>("render_page", {
+      page,
+      zoom: deviceZoom,
+      rotation: state.rotation,
+    });
     if (generation !== state.generation) return;
 
     paintSlot(slot, decodePage(full), cssWidth, cssHeight);
@@ -412,7 +438,11 @@ function drawHighlights(page: number): void {
   const slot = state.slots.get(page);
   if (slot === undefined) return;
 
-  const hits = state.search.hits.filter((hit) => hit.page === page);
+  // Hit rectangles are in unrotated page coordinates. Mapping them through a
+  // rotation is straightforward but untested, and a highlight in the wrong
+  // place is worse than none — so while rotated, none are drawn.
+  const hits =
+    state.rotation === 0 ? state.search.hits.filter((hit) => hit.page === page) : [];
   const size = state.pageSizes.get(page);
 
   // Only pay for an overlay when there is something to draw on it. A
@@ -531,7 +561,7 @@ async function applyFit(mode: ZoomMode = state.zoomMode): Promise<void> {
   if (available.width < 50 || available.height < 50) return;
 
   try {
-    const size = await pageSize(state.page);
+    const size = displayedSize(await pageSize(state.page));
     if (size.width <= 0 || size.height <= 0) return;
 
     const scale =
@@ -543,6 +573,18 @@ async function applyFit(mode: ZoomMode = state.zoomMode): Promise<void> {
   } catch (error) {
     showError(`Could not fit page: ${String(error)}`);
   }
+}
+
+/** Rotates the whole document by a quarter turn. */
+function rotate(direction: 1 | -1): void {
+  state.rotation = (((state.rotation + direction * 90) % 360) + 360) % 360;
+
+  // Highlights are computed from unrotated page coordinates, so they would sit
+  // in the wrong place on a rotated page. Rather than draw them wrong, they
+  // are suppressed while rotated — an honest gap instead of a misleading one.
+  invalidate(false);
+
+  if (state.zoomMode !== "manual") void applyFit();
 }
 
 function setViewMode(mode: ViewMode): void {
@@ -688,26 +730,175 @@ async function openDocument(): Promise<void> {
     });
     if (typeof selected !== "string") return;
 
-    const info = await invoke<DocumentInfo>("open_document", { path: selected });
-
-    state.document = info;
-    state.page = 0;
-    state.zoom = 1;
-    state.zoomMode = "manual";
-    state.pageSizes.clear();
-    state.search = { query: "", hits: [], current: -1, truncated: false };
-    element<HTMLInputElement>("search-input").value = "";
-
-    clearError();
-    updateChrome();
-    invalidate(true);
-
-    // Fit on open: a page at an arbitrary 100% is rarely what anyone wants
-    // first, and it makes the fit mode discoverable.
-    await applyFit("fit-page");
+    await loadDocument(selected, undefined);
   } catch (error) {
     showError(`Could not open document: ${String(error)}`);
   }
+}
+
+/**
+ * Opens a path, prompting for a password as many times as the user is willing.
+ *
+ * Retries rather than giving up after one wrong password: mistyping is the
+ * common case, and making the user reopen the file for it is needless.
+ */
+async function loadDocument(path: string, password: string | undefined): Promise<void> {
+  let attempt = password;
+  let message = "This document is password protected.";
+
+  for (;;) {
+    try {
+      const info = await invoke<DocumentInfo>("open_document", {
+        path,
+        password: attempt ?? null,
+      });
+
+      state.document = info;
+      state.page = 0;
+      state.zoom = 1;
+      state.zoomMode = "manual";
+      state.rotation = 0;
+      state.pageSizes.clear();
+      state.search = { query: "", hits: [], current: -1, truncated: false };
+      element<HTMLInputElement>("search-input").value = "";
+
+      clearError();
+      updateChrome();
+      invalidate(true);
+      await applyFit("fit-page");
+      await loadOutline();
+      return;
+    } catch (error) {
+      const open = error as Partial<OpenError>;
+      if (open?.needsPassword !== true) {
+        showError(`Could not open document: ${open?.message ?? String(error)}`);
+        return;
+      }
+
+      const entered = await askForPassword(message);
+      if (entered === null) return; // cancelled; not an error
+      attempt = entered;
+      message = "That password was not accepted. Try again.";
+    }
+  }
+}
+
+// --- outline ---------------------------------------------------------------
+
+async function loadOutline(): Promise<void> {
+  const list = element("outline-list");
+  const empty = element("outline-empty");
+
+  try {
+    state.outline = await invoke<OutlineEntry[]>("outline");
+  } catch {
+    state.outline = [];
+  }
+
+  list.replaceChildren();
+  empty.hidden = state.outline.length > 0;
+
+  for (const entry of state.outline) {
+    const item = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = entry.title || "(untitled)";
+    // Indentation carries the nesting the flattened list would otherwise lose.
+    button.style.paddingLeft = `${0.4 + entry.depth * 0.75}rem`;
+
+    if (entry.page === null) {
+      // Shown but not clickable: an entry whose action is not a page jump
+      // should not silently send the user to page one.
+      button.disabled = true;
+      button.title = "This entry does not link to a page";
+    } else {
+      const target = entry.page;
+      button.addEventListener("click", () => goToPage(target));
+    }
+
+    item.append(button);
+    list.append(item);
+  }
+}
+
+function toggleOutline(): void {
+  const panel = element("outline");
+  panel.hidden = !panel.hidden;
+  element("toggle-outline").classList.toggle("active", !panel.hidden);
+}
+
+// --- password --------------------------------------------------------------
+
+/**
+ * Asks for a document password.
+ *
+ * Resolves to the password, or null if the user cancelled. The value is used
+ * once and handed straight to the backend; it is never stored or logged.
+ */
+function askForPassword(message: string): Promise<string | null> {
+  const dialog = element<HTMLDialogElement>("password-dialog");
+  const input = element<HTMLInputElement>("password-input");
+  const submit = element("password-submit");
+  const cancel = element("password-cancel");
+
+  element("password-message").textContent = message;
+  input.value = "";
+
+  return new Promise((resolve) => {
+    let settled = false;
+
+    /**
+     * Settles from the button handlers, not from the dialog's `close` event.
+     *
+     * Two engine behaviours made the event-driven version hang: `<form
+     * method="dialog">` had not set `returnValue` by the time the handler ran,
+     * and `dialog.close()` closed the dialog **without dispatching `close` at
+     * all**. The promise then never settled, so the retry loop waited forever
+     * — no dialog, no error, nothing. Resolving where the user's intent is
+     * actually known removes the dependency entirely.
+     */
+    const settle = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+
+      submit.removeEventListener("click", onSubmit);
+      cancel.removeEventListener("click", onCancel);
+      input.removeEventListener("keydown", onKey);
+      dialog.removeEventListener("close", onDismiss);
+
+      // Never leave a password sitting in the DOM.
+      input.value = "";
+      resolve(value);
+    };
+
+    function onSubmit(): void {
+      const entered = input.value;
+      settle(entered);
+      dialog.close();
+    }
+    function onCancel(): void {
+      settle(null);
+      dialog.close();
+    }
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        onSubmit();
+      }
+    }
+    /** Escape dismisses natively, with no click to observe. */
+    function onDismiss(): void {
+      settle(null);
+    }
+
+    submit.addEventListener("click", onSubmit);
+    cancel.addEventListener("click", onCancel);
+    input.addEventListener("keydown", onKey);
+    dialog.addEventListener("close", onDismiss);
+
+    dialog.showModal();
+    input.focus();
+  });
 }
 
 async function showSandboxStatus(): Promise<void> {
@@ -755,6 +946,9 @@ function wireUp(): void {
   element("zoom-out").addEventListener("click", () => stepZoom(-1));
   element("zoom-fit").addEventListener("click", () => void applyFit("fit-page"));
   element("zoom-fit-width").addEventListener("click", () => void applyFit("fit-width"));
+  element("rotate-left").addEventListener("click", () => rotate(-1));
+  element("rotate-right").addEventListener("click", () => rotate(1));
+  element("toggle-outline").addEventListener("click", () => toggleOutline());
   element("view-page").addEventListener("click", () => setViewMode("page"));
   element("view-scroll").addEventListener("click", () => setViewMode("scroll"));
 
