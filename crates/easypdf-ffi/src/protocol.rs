@@ -1,6 +1,6 @@
 //! Messages exchanged with the worker process.
 
-use easypdf_core::text::{OutlineEntry, SearchHit};
+use easypdf_core::text::{OutlineEntry, SearchHit, TextLayout};
 use serde::{Deserialize, Serialize};
 
 /// Which kernel resource ceilings the worker managed to apply to itself.
@@ -128,6 +128,12 @@ pub enum Request {
         page: usize,
     },
 
+    /// Fetch a page's characters and their positions, for text selection.
+    TextLayout {
+        /// Zero-based page index.
+        page: usize,
+    },
+
     /// Fetch the document outline (bookmarks).
     Outline,
 
@@ -193,6 +199,12 @@ pub enum Response {
     TextExtracted {
         /// The page's text in reading order.
         text: String,
+    },
+
+    /// A page's characters and their positions.
+    TextLayout {
+        /// The layout.
+        layout: TextLayout,
     },
 
     /// The document outline, flattened depth-first. Empty when there is none.

@@ -384,3 +384,46 @@ fn a_document_without_an_outline_returns_an_empty_list() {
     let rasterizer = rasterizer_or_skip!();
     assert!(open(&rasterizer, "minimal.pdf").outline().is_empty());
 }
+
+#[test]
+fn text_layout_reports_each_character_with_a_usable_box() {
+    let rasterizer = rasterizer_or_skip!();
+    let layout = open(&rasterizer, "minimal.pdf").text_layout(0).unwrap();
+
+    assert!(!layout.truncated);
+
+    let reconstructed: String = layout.chars.iter().map(|c| c.text.as_str()).collect();
+    assert!(reconstructed.contains("Hello EasyPDF"), "reconstructed {reconstructed:?}");
+
+    // Every box must be usable as a pointer target. Tight bounds would collapse
+    // spaces to slivers, which is why loose bounds are used.
+    for character in &layout.chars {
+        assert!(
+            !character.rect.is_degenerate(),
+            "character {:?} has an unhittable box {:?}",
+            character.text,
+            character.rect
+        );
+        assert!(character.rect.left >= -1.0 && character.rect.right <= 201.0, "{character:?}");
+        assert!(character.rect.bottom >= -1.0 && character.rect.top <= 101.0, "{character:?}");
+    }
+}
+
+#[test]
+fn characters_are_returned_in_reading_order() {
+    let rasterizer = rasterizer_or_skip!();
+    let layout = open(&rasterizer, "minimal.pdf").text_layout(0).unwrap();
+
+    let text: String = layout.chars.iter().map(|c| c.text.as_str()).collect();
+    let extracted = open(&rasterizer, "minimal.pdf").extract_text(0).unwrap();
+
+    // The character walk and the plain-text extraction must agree, or a
+    // selection would copy something different from what is on screen.
+    assert_eq!(text.trim(), extracted.trim());
+}
+
+#[test]
+fn text_layout_of_a_missing_page_is_refused() {
+    let rasterizer = rasterizer_or_skip!();
+    assert!(open(&rasterizer, "minimal.pdf").text_layout(42).is_err());
+}

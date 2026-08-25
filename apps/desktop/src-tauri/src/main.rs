@@ -114,6 +114,15 @@ fn open_document(
     session.open(std::path::Path::new(&path), password)
 }
 
+/// A page's characters and their positions, for text selection.
+#[tauri::command]
+fn text_layout(
+    page: usize,
+    session: State<'_, Session>,
+) -> Result<easypdf_core::text::TextLayout, String> {
+    session.text_layout(page)
+}
+
 /// The document outline (bookmarks). Empty when the document has none.
 #[tauri::command]
 fn outline(session: State<'_, Session>) -> Result<Vec<easypdf_core::text::OutlineEntry>, String> {
@@ -228,6 +237,7 @@ fn main() {
             extract_text,
             search,
             outline,
+            text_layout,
             close_document,
             document_info
         ])

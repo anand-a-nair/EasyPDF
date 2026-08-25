@@ -221,6 +221,11 @@ button.primary {
   background: #ffffff;
   box-shadow: 0 2px 12px var(--page-shadow);
   line-height: 0;
+  /* Text is selected through our own hit-testing, so the browser's native
+     drag-select of the canvas would only fight it. */
+  cursor: text;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .page-canvas {

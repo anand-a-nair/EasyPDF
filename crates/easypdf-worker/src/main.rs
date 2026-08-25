@@ -205,6 +205,17 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
             }
         }
 
+        Request::TextLayout { page } => {
+            let Some(document) = session.document.as_ref() else {
+                return Response::Failed(no_document());
+            };
+
+            match document.text_layout(*page) {
+                Ok(layout) => Response::TextLayout { layout },
+                Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
+            }
+        }
+
         Request::Outline => {
             let Some(document) = session.document.as_ref() else {
                 return Response::Failed(no_document());

@@ -485,3 +485,36 @@ fn rotation_reaches_the_renderer_through_the_boundary() {
         other => panic!("expected two rendered pages, got {other:?}"),
     }
 }
+
+#[test]
+fn text_layout_crosses_the_boundary_with_usable_geometry() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    match worker.request(&Request::TextLayout { page: 0 }).unwrap() {
+        Response::TextLayout { layout } => {
+            assert!(!layout.chars.is_empty());
+            assert!(!layout.truncated);
+
+            let text: String = layout.chars.iter().map(|c| c.text.as_str()).collect();
+            assert!(text.contains("Hello EasyPDF"), "{text:?}");
+
+            // Every box must be hittable, or selection cannot target it.
+            for character in &layout.chars {
+                assert!(!character.rect.is_degenerate(), "{character:?}");
+            }
+        }
+        other => panic!("expected TextLayout, got {other:?}"),
+    }
+}
+
+#[test]
+fn text_layout_without_a_document_is_refused() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let response = worker.request(&Request::TextLayout { page: 0 }).unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+}

@@ -109,3 +109,29 @@ pub struct OutlineEntry {
     /// page 1.
     pub page: Option<usize>,
 }
+
+/// One character and where it sits on the page.
+///
+/// Selection is done on the frontend from a cached copy of this list, so a
+/// drag never costs an IPC round trip per mouse move. That trade is the whole
+/// reason the geometry is shipped up front rather than queried per gesture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CharBox {
+    /// The character. A string rather than a `char` because it crosses a JSON
+    /// boundary, and because PDFium can report a value that is not a scalar.
+    pub text: String,
+    /// Where it sits, in unrotated page points.
+    pub rect: TextRect,
+}
+
+/// A page's characters in reading order.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct TextLayout {
+    /// Characters in the order PDFium reports them.
+    pub chars: Vec<CharBox>,
+    /// Whether the list was capped.
+    ///
+    /// Reported rather than hidden, on the same principle as search truncation:
+    /// a silently shortened page is a lie about the document.
+    pub truncated: bool,
+}

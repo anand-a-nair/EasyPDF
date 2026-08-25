@@ -23,7 +23,7 @@ use pdfium_render::prelude::{
     Pdfium, PdfiumError, PdfiumInternalError,
 };
 
-use easypdf_core::text::{OutlineEntry, SearchHit, TextRect};
+use easypdf_core::text::{CharBox, OutlineEntry, SearchHit, TextLayout, TextRect};
 
 use crate::cache::{Tile, TileKey};
 
@@ -123,6 +123,13 @@ pub enum RenderError {
 /// Returning them all would stall the UI and blow the frame limit, and nobody
 /// steps through 40,000 results. The caller is told the count was capped.
 pub const MAX_SEARCH_HITS: usize = 500;
+
+/// Largest number of characters returned for one page.
+///
+/// A pathological page can declare enormous numbers of glyphs. The cap bounds
+/// both the response size and the frontend's per-drag hit-testing work; a page
+/// beyond it is reported as truncated rather than silently shortened.
+pub const MAX_CHARS_PER_PAGE: usize = 20_000;
 
 /// Largest number of outline entries collected from one document.
 ///
@@ -329,6 +336,58 @@ impl OpenDocument {
             .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
 
         Ok(text.all())
+    }
+
+    /// A page's characters and their positions, in reading order.
+    ///
+    /// Used for text selection. Returned in one go and cached by the caller,
+    /// so dragging a selection costs no IPC at all.
+    pub fn text_layout(&self, page: usize) -> Result<TextLayout, RenderError> {
+        let _guard = render_lock();
+        let index = self.page_index(page)?;
+
+        let handle = self
+            .document
+            .pages()
+            .get(index)
+            .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
+
+        let text = handle
+            .text()
+            .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
+
+        let mut chars = Vec::new();
+        let mut truncated = false;
+
+        for character in text.chars().iter() {
+            if chars.len() >= MAX_CHARS_PER_PAGE {
+                truncated = true;
+                break;
+            }
+
+            let Some(value) = character.unicode_char() else {
+                continue;
+            };
+
+            // Loose bounds rather than tight: tight boxes hug the ink, so
+            // spaces and punctuation collapse to slivers that are impossible
+            // to hit with a pointer. Selection wants the character cell.
+            let Ok(bounds) = character.loose_bounds() else {
+                continue;
+            };
+
+            chars.push(CharBox {
+                text: value.to_string(),
+                rect: TextRect {
+                    left: bounds.left().value,
+                    bottom: bounds.bottom().value,
+                    right: bounds.right().value,
+                    top: bounds.top().value,
+                },
+            });
+        }
+
+        Ok(TextLayout { chars, truncated })
     }
 
     /// Searches the whole document, returning positioned hits.

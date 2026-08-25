@@ -86,9 +86,16 @@ fn holding_a_document_open_beats_reparsing_it() {
 }
 
 #[test]
-fn warm_up_cost_is_paid_once_not_per_page() {
-    // The one-time index build must not repeat. If it does, every scroll tick
-    // pays 60ms and the viewer feels broken.
+fn warm_up_cost_is_not_paid_per_page() {
+    // The property that matters: PDFium's page-index build must happen once,
+    // not on every render. If it repeated, every scroll tick would cost tens
+    // of milliseconds and the viewer would feel broken.
+    //
+    // Asserted as an absolute bound rather than a ratio against the first
+    // render. Tests share a process and PDFium is a process-wide singleton, so
+    // by the time this runs the library may already be warm and "first" is
+    // then indistinguishable from "later" — a ratio assertion fails for a
+    // reason that has nothing to do with the behaviour under test.
     let Some(dir) = library_dir() else {
         eprintln!("skipping: vendored PDFium not present");
         return;
@@ -96,20 +103,21 @@ fn warm_up_cost_is_paid_once_not_per_page() {
     let rasterizer = PdfiumRasterizer::load_from(&dir).unwrap();
     let document = rasterizer.open(corpus("many-pages.pdf"), None).unwrap();
 
-    let first = Instant::now();
-    document.render(key(0)).unwrap();
-    let first = first.elapsed();
+    document.render(key(0)).unwrap(); // absorb any warm-up
 
-    let later = Instant::now();
+    let start = Instant::now();
     for page in 1..20 {
         document.render(key(page)).unwrap();
     }
-    let later_average = later.elapsed() / 19;
+    let average = start.elapsed() / 19;
 
-    println!("first render {first:?}, later average {later_average:?}");
+    // Warm-up is tens of milliseconds; a warm render is tens of microseconds.
+    // Five milliseconds sits far below the former and far above the latter,
+    // even in a debug build on a loaded machine.
+    println!("average warm render: {average:?}");
     assert!(
-        later_average * 4 < first.max(std::time::Duration::from_micros(1)),
-        "later renders ({later_average:?}) should be far cheaper than the first ({first:?})"
+        average < std::time::Duration::from_millis(5),
+        "renders averaged {average:?}, which suggests per-page index rebuilding"
     );
 }
 

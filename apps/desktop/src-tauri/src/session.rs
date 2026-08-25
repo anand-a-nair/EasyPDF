@@ -7,7 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use easypdf_core::text::{OutlineEntry, SearchHit};
+use easypdf_core::text::{OutlineEntry, SearchHit, TextLayout};
 use easypdf_ffi::protocol::{Request, Response, WorkerError};
 use easypdf_ffi::worker::Worker;
 use easypdf_render::cache::{Tile, TileCache, TileKey, ZoomBucket};
@@ -140,6 +140,15 @@ impl Session {
             Response::Failed(WorkerError::BadPassword) => Err(OpenError::password_required()),
             Response::Failed(error) => Err(OpenError::failed(error.to_string())),
             other => Err(OpenError::failed(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    /// A page's characters and their positions, for text selection.
+    pub(crate) fn text_layout(&self, page: usize) -> Result<TextLayout, String> {
+        match self.send(&Request::TextLayout { page }).map_err(|e| e.to_string())? {
+            Response::TextLayout { layout } => Ok(layout),
+            Response::Failed(error) => Err(error.to_string()),
+            other => Err(format!("unexpected response: {other:?}")),
         }
     }
 

@@ -57,6 +57,18 @@
               return { running: true, sandboxed: true, detail: "confined via seatbelt", memoryCapped: false };
             case "plugin:dialog|open":
               return "/fake/example.pdf";
+            case "text_layout": {
+              // Twelve characters laid out left to right on one line, so a
+              // drag across them selects a predictable substring.
+              const word = "Hello EasyPDF";
+              return {
+                chars: [...word].map((ch, i) => ({
+                  text: ch,
+                  rect: { left: 20 + i * 12, bottom: 40, right: 20 + i * 12 + 12, top: 64 },
+                })),
+                truncated: false,
+              };
+            }
             case "outline":
               return window.__harness.outline;
             case "open_document":

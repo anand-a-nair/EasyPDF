@@ -43,6 +43,16 @@ interface SearchResults {
   readonly truncated: boolean;
 }
 
+interface CharBox {
+  readonly text: string;
+  readonly rect: TextRect;
+}
+
+interface TextLayout {
+  readonly chars: readonly CharBox[];
+  readonly truncated: boolean;
+}
+
 interface OutlineEntry {
   readonly title: string;
   readonly depth: number;
@@ -120,6 +130,15 @@ const state = {
   /** Display rotation in degrees clockwise, applied to every page. */
   rotation: 0,
   outline: [] as readonly OutlineEntry[],
+  /** Per-page character geometry, fetched once and reused for every drag. */
+  layouts: new Map<number, TextLayout>(),
+  selection: {
+    page: -1,
+    /** Inclusive character range; -1 when nothing is selected. */
+    from: -1,
+    to: -1,
+    dragging: false,
+  },
   slots: new Map<number, Slot>(),
   search: {
     query: "",
@@ -201,7 +220,22 @@ function createSlot(page: number): Slot {
   highlights.height = 0;
 
   root.append(canvas, highlights);
-  return { root, canvas, highlights, renderedKey: null, hasPixels: false };
+  const slot: Slot = { root, canvas, highlights, renderedKey: null, hasPixels: false };
+
+  root.addEventListener("pointerdown", (event) => {
+    // Left button only; a right-click should not wipe the selection.
+    if (event.button !== 0) return;
+    event.preventDefault();
+    root.setPointerCapture(event.pointerId);
+    void beginSelection(event, page);
+  });
+  root.addEventListener("pointermove", (event) => extendSelection(event, page));
+  root.addEventListener("pointerup", (event) => {
+    state.selection.dragging = false;
+    if (root.hasPointerCapture(event.pointerId)) root.releasePointerCapture(event.pointerId);
+  });
+
+  return slot;
 }
 
 /** Sizes a slot from the page dimensions, without waiting for pixels. */
@@ -440,15 +474,22 @@ function drawHighlights(page: number): void {
 
   // Hit rectangles are in unrotated page coordinates. Mapping them through a
   // rotation is straightforward but untested, and a highlight in the wrong
-  // place is worse than none — so while rotated, none are drawn.
-  const hits =
-    state.rotation === 0 ? state.search.hits.filter((hit) => hit.page === page) : [];
+  // place is worse than none — so while rotated, neither highlights nor
+  // selection are drawn.
+  const rotated = state.rotation !== 0;
+  const hits = rotated ? [] : state.search.hits.filter((hit) => hit.page === page);
+  const selectionRects = rotated ? [] : selectedRects(page);
   const size = state.pageSizes.get(page);
 
   // Only pay for an overlay when there is something to draw on it. A
   // full-size second canvas per page doubles the memory of every rendered
-  // page, and most of the time no search is running at all.
-  if (hits.length === 0 || size === undefined || size.width <= 0 || size.height <= 0) {
+  // page, and most of the time nothing is highlighted or selected.
+  if (
+    (hits.length === 0 && selectionRects.length === 0) ||
+    size === undefined ||
+    size.width <= 0 ||
+    size.height <= 0
+  ) {
     slot.highlights.width = 0;
     slot.highlights.height = 0;
     return;
@@ -480,6 +521,178 @@ function drawHighlights(page: number): void {
       context.fillRect(rect.left * scaleX, (size.height - rect.top) * scaleY, width, height);
     }
   });
+
+  // Selection is drawn last so it reads on top of a search highlight.
+  context.fillStyle = "rgba(64, 120, 220, 0.35)";
+  for (const rect of selectionRects) {
+    const width = (rect.right - rect.left) * scaleX;
+    const height = (rect.top - rect.bottom) * scaleY;
+    if (width <= 0 || height <= 0) continue;
+    context.fillRect(rect.left * scaleX, (size.height - rect.top) * scaleY, width, height);
+  }
+}
+
+// --- text selection --------------------------------------------------------
+
+/** Fetches a page's character geometry once, then reuses it. */
+async function textLayout(page: number): Promise<TextLayout> {
+  const known = state.layouts.get(page);
+  if (known !== undefined) return known;
+
+  const layout = await invoke<TextLayout>("text_layout", { page });
+  state.layouts.set(page, layout);
+  return layout;
+}
+
+/** Rectangles covering the current selection on `page`. */
+function selectedRects(page: number): TextRect[] {
+  const { page: selectedPage, from, to } = state.selection;
+  if (selectedPage !== page || from < 0 || to < 0) return [];
+
+  const layout = state.layouts.get(page);
+  if (layout === undefined) return [];
+
+  const [start, end] = from <= to ? [from, to] : [to, from];
+  return layout.chars.slice(start, end + 1).map((character) => character.rect);
+}
+
+/** The selected text, or an empty string. */
+function selectedText(): string {
+  const { page, from, to } = state.selection;
+  const layout = state.layouts.get(page);
+  if (layout === undefined || from < 0 || to < 0) return "";
+
+  const [start, end] = from <= to ? [from, to] : [to, from];
+  return layout.chars
+    .slice(start, end + 1)
+    .map((character) => character.text)
+    .join("");
+}
+
+/** Converts a pointer event to page coordinates in points. */
+function pointToPageCoords(
+  event: PointerEvent,
+  slot: Slot,
+  page: number,
+): { x: number; y: number } | null {
+  const size = state.pageSizes.get(page);
+  if (size === undefined || size.width <= 0 || size.height <= 0) return null;
+
+  const bounds = slot.root.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) return null;
+
+  const x = ((event.clientX - bounds.left) / bounds.width) * size.width;
+  // PDF's origin is bottom-left; the pointer's is top-left.
+  const y = size.height - ((event.clientY - bounds.top) / bounds.height) * size.height;
+  return { x, y };
+}
+
+/**
+ * Finds the character nearest a page-space point.
+ *
+ * Nearest rather than strictly containing: a drag that ends in the gutter or
+ * between lines should still select something sensible, not nothing.
+ */
+function nearestCharIndex(layout: TextLayout, x: number, y: number): number {
+  let best = -1;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  layout.chars.forEach((character, index) => {
+    const { left, right, bottom, top } = character.rect;
+    // Distance to the rectangle, zero when inside it.
+    const dx = x < left ? left - x : x > right ? x - right : 0;
+    const dy = y < bottom ? bottom - y : y > top ? y - top : 0;
+    const distance = dx * dx + dy * dy;
+
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = index;
+    }
+  });
+
+  return best;
+}
+
+function clearSelection(): void {
+  const previous = state.selection.page;
+  state.selection = { page: -1, from: -1, to: -1, dragging: false };
+  if (previous >= 0) drawHighlights(previous);
+}
+
+async function beginSelection(event: PointerEvent, page: number): Promise<void> {
+  const slot = state.slots.get(page);
+  if (slot === undefined || state.rotation !== 0) return;
+
+  try {
+    const layout = await textLayout(page);
+    const point = pointToPageCoords(event, slot, page);
+    if (point === null) return;
+
+    const index = nearestCharIndex(layout, point.x, point.y);
+    if (index < 0) return;
+
+    if (state.selection.page >= 0 && state.selection.page !== page) {
+      drawHighlights(state.selection.page);
+    }
+    state.selection = { page, from: index, to: index, dragging: true };
+    drawHighlights(page);
+  } catch (error) {
+    showError(`Could not prepare text selection: ${String(error)}`);
+  }
+}
+
+function extendSelection(event: PointerEvent, page: number): void {
+  if (!state.selection.dragging || state.selection.page !== page) return;
+
+  const slot = state.slots.get(page);
+  const layout = state.layouts.get(page);
+  if (slot === undefined || layout === undefined) return;
+
+  const point = pointToPageCoords(event, slot, page);
+  if (point === null) return;
+
+  const index = nearestCharIndex(layout, point.x, point.y);
+  if (index < 0 || index === state.selection.to) return;
+
+  state.selection.to = index;
+  drawHighlights(page);
+}
+
+/**
+ * Copies the selection.
+ *
+ * Tries the async clipboard API, then falls back to a hidden textarea. The
+ * webview is not always treated as a secure context, and `navigator.clipboard`
+ * is simply absent when it is not — a silent no-op on Copy would be worse than
+ * the deprecated fallback.
+ */
+async function copySelection(): Promise<void> {
+  const text = selectedText();
+  if (text === "") return;
+
+  try {
+    if (navigator.clipboard?.writeText !== undefined) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall through to the textarea.
+  }
+
+  const scratch = document.createElement("textarea");
+  scratch.value = text;
+  scratch.setAttribute("readonly", "");
+  scratch.style.position = "fixed";
+  scratch.style.opacity = "0";
+  document.body.append(scratch);
+  scratch.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    showError("Could not copy the selection.");
+  } finally {
+    scratch.remove();
+  }
 }
 
 function redrawAllHighlights(): void {
@@ -759,6 +972,8 @@ async function loadDocument(path: string, password: string | undefined): Promise
       state.zoomMode = "manual";
       state.rotation = 0;
       state.pageSizes.clear();
+      state.layouts.clear();
+      state.selection = { page: -1, from: -1, to: -1, dragging: false };
       state.search = { query: "", hits: [], current: -1, truncated: false };
       element<HTMLInputElement>("search-input").value = "";
 
@@ -818,6 +1033,25 @@ async function loadOutline(): Promise<void> {
 
     item.append(button);
     list.append(item);
+  }
+}
+
+/** Selects everything on the current page. */
+async function selectWholePage(): Promise<void> {
+  if (state.document === null || state.rotation !== 0) return;
+
+  try {
+    const layout = await textLayout(state.page);
+    if (layout.chars.length === 0) return;
+    state.selection = {
+      page: state.page,
+      from: 0,
+      to: layout.chars.length - 1,
+      dragging: false,
+    };
+    drawHighlights(state.page);
+  } catch (error) {
+    showError(`Could not select page text: ${String(error)}`);
   }
 }
 
@@ -992,6 +1226,25 @@ function wireUp(): void {
 
   document.addEventListener("keydown", (event) => {
     if (state.document === null) return;
+
+    if ((event.metaKey || event.ctrlKey) && event.key === "c") {
+      if (selectedText() !== "") {
+        event.preventDefault();
+        void copySelection();
+      }
+      return;
+    }
+
+    if ((event.metaKey || event.ctrlKey) && event.key === "a") {
+      event.preventDefault();
+      void selectWholePage();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      clearSelection();
+      return;
+    }
 
     if ((event.metaKey || event.ctrlKey) && event.key === "f") {
       event.preventDefault();
