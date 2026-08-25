@@ -19,7 +19,9 @@
 pub mod command;
 pub mod document;
 pub mod error;
+pub mod text;
 
 pub use command::{Command, CommandStack};
 pub use document::{Document, Page, PageIndex, PageSize, Rotation};
 pub use error::{Error, Result};
+pub use text::{SearchHit, TextRect};

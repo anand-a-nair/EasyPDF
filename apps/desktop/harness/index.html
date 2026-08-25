@@ -62,6 +62,21 @@
               return fakePage(Math.round(200 * args.zoom), Math.round(100 * args.zoom));
             case "page_size":
               return { width: 200, height: 100 };
+            case "extract_text":
+              return "Hello EasyPDF";
+            case "search":
+              if (!args.query) return { hits: [], truncated: false };
+              if (args.query === "nomatch") return { hits: [], truncated: false };
+              // Page 0 hit near the BOTTOM of the page (bottom=10),
+              // page 2 hit near the TOP (bottom=80). If the coordinate flip is
+              // wrong these land on the wrong side and the test catches it.
+              return {
+                hits: [
+                  { page: 0, rects: [{ left: 20, bottom: 10, right: 90, top: 30 }] },
+                  { page: 2, rects: [{ left: 20, bottom: 80, right: 90, top: 95 }] },
+                ],
+                truncated: false,
+              };
             case "close_document":
               return null;
             default:
@@ -85,6 +100,12 @@
         <button id="zoom-in" type="button">+</button>
         <button id="zoom-fit" type="button">Fit</button>
       </div>
+      <div class="group" data-requires-document>
+        <input id="search-input" type="search" placeholder="Find in document" />
+        <button id="search-prev" type="button">‹</button>
+        <span id="search-count"></span>
+        <button id="search-next" type="button">›</button>
+      </div>
       <span id="doc-name"></span>
       <span id="sandbox-badge"></span>
     </header>
@@ -94,7 +115,10 @@
         <p>Open a PDF to get started.</p>
         <button id="open-empty" type="button" class="primary">Open a PDF…</button>
       </div>
-      <canvas id="page" hidden></canvas>
+      <div id="page-stack" hidden>
+        <canvas id="page"></canvas>
+        <canvas id="highlights"></canvas>
+      </div>
     </main>
     <div id="error" role="alert" hidden></div>
     <script type="module" src="../dist/main.js"></script>

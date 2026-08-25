@@ -42,6 +42,8 @@ The canonical version is in [`.version`](.version).
 ### Notes
 - Page viewer: open a PDF, navigate pages, zoom, fit to window, with
   progressive rendering and a memory-bounded tile cache
+- Full-document search with highlighted results, match stepping, and Cmd/Ctrl+F
+- Per-page text extraction
 - Toolbar badge showing whether the worker is actually sandboxed
 
 [Unreleased]: https://github.com/anandnair/easypdf/compare/main...HEAD

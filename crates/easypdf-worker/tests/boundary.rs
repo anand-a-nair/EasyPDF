@@ -52,16 +52,19 @@ fn worker_confines_itself_before_accepting_input() {
 }
 
 #[test]
-fn unimplemented_operations_refuse_clearly() {
-    // Honest refusal over plausible nonsense — ideas/01-vision.md.
-    // Text extraction is the remaining unimplemented operation.
+fn operations_without_a_document_refuse_clearly() {
+    // Every protocol operation is now implemented, so there is no longer an
+    // "unsupported" case to test. What still matters is honest refusal:
+    // asking for text with nothing open must say so rather than return an
+    // empty string, which would be indistinguishable from a blank page.
     let mut worker = spawn();
 
     let response = worker.request(&Request::ExtractText { page: 0 }).expect("worker should answer");
 
     match response {
-        Response::Failed(WorkerError::Unsupported(message)) => {
-            assert!(!message.is_empty(), "a refusal must explain itself");
+        Response::Failed(error) => {
+            let message = error.to_string();
+            assert!(message.contains("no document"), "refusal should say why: {message}");
         }
         other => panic!("expected an explicit refusal, got {other:?}"),
     }
@@ -78,7 +81,7 @@ fn worker_survives_a_sequence_of_requests() {
     let mut worker = spawn();
     for page in 0..5 {
         let response = worker.request(&Request::ExtractText { page }).unwrap();
-        assert!(matches!(response, Response::Failed(WorkerError::Unsupported(_))));
+        assert!(matches!(response, Response::Failed(_)), "page {page}: {response:?}");
     }
     // Still healthy after repeated refusals.
     assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
@@ -325,4 +328,70 @@ fn page_size_of_a_missing_page_is_refused() {
 
     let response = worker.request(&Request::PageSize { page: 99 }).unwrap();
     assert!(matches!(response, Response::Failed(_)), "{response:?}");
+}
+
+#[test]
+fn text_is_extracted_inside_the_sandbox() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    match worker.request(&Request::ExtractText { page: 0 }).unwrap() {
+        Response::TextExtracted { text } => {
+            assert!(text.contains("Hello EasyPDF"), "extracted {text:?}");
+        }
+        other => panic!("expected TextExtracted, got {other:?}"),
+    }
+}
+
+#[test]
+fn search_returns_positioned_hits_inside_the_sandbox() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    let request = Request::Search { query: "EasyPDF".to_owned(), match_case: false };
+    match worker.request(&request).unwrap() {
+        Response::SearchResults { hits, truncated } => {
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0].page, 0);
+            assert!(!truncated);
+
+            let rect = hits[0].rects.first().expect("a hit needs a rectangle");
+            assert!(!rect.is_degenerate(), "degenerate rect: {rect:?}");
+            // Inside the 200x100 fixture page.
+            assert!(rect.left >= 0.0 && rect.right <= 200.0, "{rect:?}");
+            assert!(rect.bottom >= 0.0 && rect.top <= 100.0, "{rect:?}");
+        }
+        other => panic!("expected SearchResults, got {other:?}"),
+    }
+}
+
+#[test]
+fn searching_with_no_document_open_is_refused() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    let request = Request::Search { query: "anything".to_owned(), match_case: false };
+    let response = worker.request(&request).unwrap();
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+}
+
+#[test]
+fn search_survives_a_query_that_matches_nothing() {
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    let request = Request::Search { query: "zzzznotpresent".to_owned(), match_case: false };
+    match worker.request(&request).unwrap() {
+        Response::SearchResults { hits, .. } => assert!(hits.is_empty()),
+        other => panic!("expected SearchResults, got {other:?}"),
+    }
+
+    // Worker stays healthy.
+    assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
 }

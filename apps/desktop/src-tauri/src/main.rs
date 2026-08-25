@@ -141,6 +141,32 @@ struct PageDimensions {
     height: f32,
 }
 
+/// Extracts a page's text.
+#[tauri::command]
+fn extract_text(page: usize, session: State<'_, Session>) -> Result<String, String> {
+    session.extract_text(page)
+}
+
+/// Searches the whole document, returning positioned hits.
+#[tauri::command]
+fn search(
+    query: String,
+    match_case: bool,
+    session: State<'_, Session>,
+) -> Result<SearchResults, String> {
+    let (hits, truncated) = session.search(&query, match_case)?;
+    Ok(SearchResults { hits, truncated })
+}
+
+/// Search results, with an honest truncation flag.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchResults {
+    hits: Vec<easypdf_core::text::SearchHit>,
+    /// Whether the hit list was capped. Shown to the user rather than hidden.
+    truncated: bool,
+}
+
 /// Closes the open document and frees its cached tiles.
 #[tauri::command]
 fn close_document(session: State<'_, Session>) -> Result<(), String> {
@@ -184,6 +210,8 @@ fn main() {
             open_document,
             render_page,
             page_size,
+            extract_text,
+            search,
             close_document,
             document_info
         ])

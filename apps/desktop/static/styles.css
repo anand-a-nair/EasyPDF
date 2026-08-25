@@ -125,15 +125,47 @@ button.primary {
   padding: 2rem;
 }
 
+/* The page and its highlight overlay are stacked so highlights can be redrawn
+   without repainting the page, and vice versa. */
+#page-stack {
+  position: relative;
+  line-height: 0;
+  box-shadow: 0 2px 12px var(--page-shadow);
+}
+
 #page {
   background: #ffffff;
-  box-shadow: 0 2px 12px var(--page-shadow);
   /* The canvas is sized in CSS pixels while its backing store is sized in
      device pixels, so pages stay sharp on retina displays. */
   max-width: none;
 }
 
+#highlights {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
 #page.loading { opacity: 0.55; }
+
+body.has-document #empty-state { display: none; }
+
+#search-input {
+  width: 14rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+}
+
+#search-count {
+  min-width: 5.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
 
 #empty-state {
   margin: auto;

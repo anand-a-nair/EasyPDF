@@ -11,7 +11,9 @@ publish.workspace = true
 
 [dependencies]
 pdfium-render = { version = "0.9.3", default-features = false, features = ["pdfium_latest", "thread_safe"] }
+easypdf-core.workspace = true
 thiserror.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use easypdf_core::text::SearchHit;
 use easypdf_ffi::protocol::{Request, Response, WorkerError};
 use easypdf_ffi::worker::Worker;
 use easypdf_render::cache::{Tile, TileCache, TileKey, ZoomBucket};
@@ -142,6 +143,29 @@ impl Session {
 
         match response {
             Response::PageSize { width, height } => Ok((width, height)),
+            Response::Failed(error) => Err(error.to_string()),
+            other => Err(format!("unexpected response: {other:?}")),
+        }
+    }
+
+    /// Extracts a page's text.
+    pub(crate) fn extract_text(&self, page: usize) -> Result<String, String> {
+        match self.send(&Request::ExtractText { page }).map_err(|e| e.to_string())? {
+            Response::TextExtracted { text } => Ok(text),
+            Response::Failed(error) => Err(error.to_string()),
+            other => Err(format!("unexpected response: {other:?}")),
+        }
+    }
+
+    /// Searches the whole document.
+    pub(crate) fn search(
+        &self,
+        query: &str,
+        match_case: bool,
+    ) -> Result<(Vec<SearchHit>, bool), String> {
+        let request = Request::Search { query: query.to_owned(), match_case };
+        match self.send(&request).map_err(|e| e.to_string())? {
+            Response::SearchResults { hits, truncated } => Ok((hits, truncated)),
             Response::Failed(error) => Err(error.to_string()),
             other => Err(format!("unexpected response: {other:?}")),
         }

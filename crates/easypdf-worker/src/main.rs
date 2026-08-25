@@ -188,9 +188,33 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
             }
         }
 
-        Request::ExtractText { .. } => Response::Failed(WorkerError::Unsupported(
-            "text extraction is not implemented yet".to_owned(),
-        )),
+        Request::ExtractText { page } => {
+            let Some(rasterizer) = session.rasterizer.as_ref() else {
+                return Response::Failed(engine_missing());
+            };
+            let Some(document) = session.document.as_ref() else {
+                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+            };
+
+            match rasterizer.extract_text(document, session.password.as_deref(), *page) {
+                Ok(text) => Response::TextExtracted { text },
+                Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
+            }
+        }
+
+        Request::Search { query, match_case } => {
+            let Some(rasterizer) = session.rasterizer.as_ref() else {
+                return Response::Failed(engine_missing());
+            };
+            let Some(document) = session.document.as_ref() else {
+                return Response::Failed(WorkerError::Malformed("no document is open".to_owned()));
+            };
+
+            match rasterizer.search(document, session.password.as_deref(), query, *match_case) {
+                Ok((hits, truncated)) => Response::SearchResults { hits, truncated },
+                Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),
+            }
+        }
 
         Request::CloseDocument => {
             session.document = None;

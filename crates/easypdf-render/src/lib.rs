@@ -16,7 +16,7 @@ pub mod pdfium;
 pub mod wire;
 
 pub use cache::{Tile, TileCache, TileKey, ZoomBucket};
-pub use pdfium::{PdfiumRasterizer, RenderError};
+pub use pdfium::{MAX_SEARCH_HITS, PdfiumRasterizer, RenderError};
 pub use wire::{bgra_to_rgba, decode_page, encode_page};
 
 /// Something that can rasterize pages.

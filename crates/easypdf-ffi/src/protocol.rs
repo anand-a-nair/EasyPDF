@@ -1,5 +1,6 @@
 //! Messages exchanged with the worker process.
 
+use easypdf_core::text::SearchHit;
 use serde::{Deserialize, Serialize};
 
 /// Which kernel resource ceilings the worker managed to apply to itself.
@@ -127,6 +128,19 @@ pub enum Request {
         page: usize,
     },
 
+    /// Search the whole document.
+    ///
+    /// Done in the worker rather than by extracting text and searching on the
+    /// host: PDFium reports where each hit *is*, and reproducing that mapping
+    /// from extracted text would mean re-deriving glyph positions the engine
+    /// already knows.
+    Search {
+        /// Text to find. An empty query returns no results.
+        query: String,
+        /// Whether to match case exactly.
+        match_case: bool,
+    },
+
     /// Release all resources for the current document.
     CloseDocument,
 
@@ -176,6 +190,17 @@ pub enum Response {
     TextExtracted {
         /// The page's text in reading order.
         text: String,
+    },
+
+    /// Search results.
+    SearchResults {
+        /// Positioned hits, in document order.
+        hits: Vec<SearchHit>,
+        /// Whether the result was capped.
+        ///
+        /// Reported rather than hidden: a silently truncated count is a lie
+        /// about the document.
+        truncated: bool,
     },
 
     /// Handshake reply, sent once at startup.

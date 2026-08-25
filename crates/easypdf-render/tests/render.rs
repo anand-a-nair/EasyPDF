@@ -217,3 +217,76 @@ fn rendered_page_survives_the_full_display_pipeline() {
     let dark = decoded.pixels.as_chunks::<4>().0.iter().filter(|p| p[0] < 128).count();
     assert!(dark > 20, "pipeline produced a blank page: {dark} dark pixels");
 }
+
+// ---------------------------------------------------------------------------
+// Text extraction and search
+// ---------------------------------------------------------------------------
+
+#[test]
+fn extracts_text_from_a_page() {
+    let rasterizer = rasterizer_or_skip!();
+    let text = rasterizer.extract_text(&corpus("minimal.pdf"), None, 0).unwrap();
+    assert!(text.contains("Hello EasyPDF"), "extracted {text:?}");
+}
+
+#[test]
+fn extraction_of_a_missing_page_is_refused() {
+    let rasterizer = rasterizer_or_skip!();
+    assert!(rasterizer.extract_text(&corpus("minimal.pdf"), None, 42).is_err());
+}
+
+#[test]
+fn search_finds_text_and_reports_where_it_is() {
+    let rasterizer = rasterizer_or_skip!();
+    let (hits, truncated) =
+        rasterizer.search(&corpus("minimal.pdf"), None, "EasyPDF", false).unwrap();
+
+    assert_eq!(hits.len(), 1, "expected one hit, got {hits:?}");
+    assert_eq!(hits[0].page, 0);
+    assert!(!truncated);
+
+    // The rectangle must be real and inside the 200x100 page.
+    let rect = hits[0].rects.first().expect("a hit must carry at least one rect");
+    assert!(rect.right > rect.left, "degenerate rect: {rect:?}");
+    assert!(rect.top > rect.bottom, "degenerate rect: {rect:?}");
+    assert!(rect.left >= 0.0 && rect.right <= 200.0, "outside the page: {rect:?}");
+    assert!(rect.bottom >= 0.0 && rect.top <= 100.0, "outside the page: {rect:?}");
+}
+
+#[test]
+fn search_is_case_insensitive_by_default_and_exact_when_asked() {
+    let rasterizer = rasterizer_or_skip!();
+    let document = corpus("minimal.pdf");
+
+    let (insensitive, _) = rasterizer.search(&document, None, "easypdf", false).unwrap();
+    assert_eq!(insensitive.len(), 1, "case-insensitive search should match");
+
+    let (sensitive, _) = rasterizer.search(&document, None, "easypdf", true).unwrap();
+    assert!(sensitive.is_empty(), "case-sensitive search should not match");
+}
+
+#[test]
+fn search_for_absent_text_returns_nothing() {
+    let rasterizer = rasterizer_or_skip!();
+    let (hits, _) =
+        rasterizer.search(&corpus("minimal.pdf"), None, "zzzznotpresent", false).unwrap();
+    assert!(hits.is_empty());
+}
+
+#[test]
+fn empty_query_returns_nothing_rather_than_everything() {
+    // PDFium errors on an empty search string; returning "no results" is the
+    // sane response to an empty search box.
+    let rasterizer = rasterizer_or_skip!();
+    let (hits, _) = rasterizer.search(&corpus("minimal.pdf"), None, "", false).unwrap();
+    assert!(hits.is_empty());
+}
+
+#[test]
+fn search_on_a_document_with_no_text_layer_does_not_fail() {
+    // A page whose text cannot be read must be skipped, not fail the search:
+    // one bad page should not make the rest of the document unsearchable.
+    let rasterizer = rasterizer_or_skip!();
+    let result = rasterizer.search(&corpus("wide.pdf"), None, "nothing here", false);
+    assert!(result.is_ok(), "{result:?}");
+}

@@ -18,7 +18,9 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use pdfium_render::prelude::{PdfRenderConfig, Pdfium};
+use pdfium_render::prelude::{PdfRenderConfig, PdfSearchDirection, PdfSearchOptions, Pdfium};
+
+use easypdf_core::text::{SearchHit, TextRect};
 
 use crate::cache::{Tile, TileKey};
 
@@ -102,6 +104,13 @@ pub enum RenderError {
         height: i32,
     },
 }
+
+/// Largest number of hits returned for one search.
+///
+/// A one-letter query on a long document can match tens of thousands of times.
+/// Returning them all would stall the UI and blow the frame limit, and nobody
+/// steps through 40,000 results. The caller is told the count was capped.
+pub const MAX_SEARCH_HITS: usize = 500;
 
 /// Largest bitmap edge the renderer will produce, in pixels.
 ///
@@ -221,6 +230,106 @@ impl PdfiumRasterizer {
             pages.get(index).map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
 
         Ok((page_handle.width().value, page_handle.height().value))
+    }
+
+    /// Extracts a page's text in reading order.
+    pub fn extract_text(
+        &self,
+        document: &[u8],
+        password: Option<&str>,
+        page: usize,
+    ) -> Result<String, RenderError> {
+        let _guard = render_lock();
+
+        let document = self
+            .pdfium
+            .load_pdf_from_byte_slice(document, password)
+            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
+
+        let pages = document.pages();
+        let total = usize::try_from(pages.len()).unwrap_or(0);
+        let index = i32::try_from(page)
+            .map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
+
+        let page_handle =
+            pages.get(index).map_err(|_| RenderError::PageOutOfRange { requested: page, total })?;
+
+        let text = page_handle
+            .text()
+            .map_err(|error| RenderError::PageFailed { page, reason: error.to_string() })?;
+
+        Ok(text.all())
+    }
+
+    /// Searches the whole document, returning positioned hits.
+    ///
+    /// Returns the hits and whether the result was truncated at
+    /// [`MAX_SEARCH_HITS`]. Truncation is reported rather than hidden — a
+    /// silently capped result count is a lie about the document.
+    pub fn search(
+        &self,
+        document: &[u8],
+        password: Option<&str>,
+        query: &str,
+        match_case: bool,
+    ) -> Result<(Vec<SearchHit>, bool), RenderError> {
+        if query.is_empty() {
+            return Ok((Vec::new(), false));
+        }
+
+        let _guard = render_lock();
+
+        let document = self
+            .pdfium
+            .load_pdf_from_byte_slice(document, password)
+            .map_err(|error| RenderError::OpenFailed(error.to_string()))?;
+
+        let options = PdfSearchOptions::new().match_case(match_case);
+        let mut hits = Vec::new();
+        let mut truncated = false;
+
+        for (index, page_handle) in document.pages().iter().enumerate() {
+            let Ok(text) = page_handle.text() else {
+                // A page whose text layer cannot be read is skipped rather than
+                // failing the whole search — one bad page should not make the
+                // other 400 unsearchable.
+                continue;
+            };
+
+            let Ok(search) = text.search(query, &options) else {
+                continue;
+            };
+
+            for segments in search.iter(PdfSearchDirection::SearchForward) {
+                if hits.len() >= MAX_SEARCH_HITS {
+                    truncated = true;
+                    break;
+                }
+
+                let rects: Vec<TextRect> = segments
+                    .iter()
+                    .map(|segment| {
+                        let bounds = segment.bounds();
+                        TextRect {
+                            left: bounds.left().value,
+                            bottom: bounds.bottom().value,
+                            right: bounds.right().value,
+                            top: bounds.top().value,
+                        }
+                    })
+                    .collect();
+
+                if !rects.is_empty() {
+                    hits.push(SearchHit { page: index, rects });
+                }
+            }
+
+            if truncated {
+                break;
+            }
+        }
+
+        Ok((hits, truncated))
     }
 
     /// Number of pages, without rendering anything.

@@ -18,6 +18,23 @@ interface PageDimensions {
   readonly height: number;
 }
 
+interface TextRect {
+  readonly left: number;
+  readonly bottom: number;
+  readonly right: number;
+  readonly top: number;
+}
+
+interface SearchHit {
+  readonly page: number;
+  readonly rects: readonly TextRect[];
+}
+
+interface SearchResults {
+  readonly hits: readonly SearchHit[];
+  readonly truncated: boolean;
+}
+
 interface WorkerStatus {
   readonly running: boolean;
   readonly sandboxed: boolean;
@@ -37,6 +54,14 @@ const state = {
   zoom: 1,
   /** Guards against an older render finishing after a newer one. */
   renderToken: 0,
+  /** Current page's size in points, needed to place highlights. */
+  pageSize: null as PageDimensions | null,
+  search: {
+    query: "",
+    hits: [] as readonly SearchHit[],
+    current: -1,
+    truncated: false,
+  },
 };
 
 function element<T extends HTMLElement>(id: string): T {
@@ -46,6 +71,8 @@ function element<T extends HTMLElement>(id: string): T {
 }
 
 const canvas = element<HTMLCanvasElement>("page");
+const highlightCanvas = element<HTMLCanvasElement>("highlights");
+const pageStack = element("page-stack");
 const viewport = element("viewport");
 const errorBar = element("error");
 
@@ -89,7 +116,51 @@ function paint(image: ImageData, cssWidth: number, cssHeight: number): void {
   const context = canvas.getContext("2d");
   if (context === null) throw new Error("could not get a 2d canvas context");
   context.putImageData(image, 0, 0);
-  canvas.hidden = false;
+  pageStack.hidden = false;
+
+  // The overlay tracks the page exactly, in both coordinate systems.
+  highlightCanvas.width = image.width;
+  highlightCanvas.height = image.height;
+  highlightCanvas.style.width = `${cssWidth}px`;
+  highlightCanvas.style.height = `${cssHeight}px`;
+  drawHighlights();
+}
+
+/**
+ * Draws search highlights over the current page.
+ *
+ * PDF coordinates have their origin at the bottom-left and are measured in
+ * points; canvas coordinates start top-left in device pixels. Getting the flip
+ * wrong puts every highlight on the opposite side of the page, which looks
+ * deliberate enough to be missed.
+ */
+function drawHighlights(): void {
+  const context = highlightCanvas.getContext("2d");
+  if (context === null) return;
+
+  context.clearRect(0, 0, highlightCanvas.width, highlightCanvas.height);
+
+  const size = state.pageSize;
+  if (size === null || size.width <= 0 || size.height <= 0) return;
+
+  const scaleX = highlightCanvas.width / size.width;
+  const scaleY = highlightCanvas.height / size.height;
+
+  state.search.hits.forEach((hit, index) => {
+    if (hit.page !== state.page) return;
+
+    const isCurrent = index === state.search.current;
+    context.fillStyle = isCurrent ? "rgba(255, 145, 0, 0.45)" : "rgba(255, 213, 0, 0.35)";
+
+    for (const rect of hit.rects) {
+      const width = (rect.right - rect.left) * scaleX;
+      const height = (rect.top - rect.bottom) * scaleY;
+      // Zero-area boxes come back for whitespace; drawing them is a no-op that
+      // just costs time.
+      if (width <= 0 || height <= 0) continue;
+      context.fillRect(rect.left * scaleX, (size.height - rect.top) * scaleY, width, height);
+    }
+  });
 }
 
 /**
@@ -104,6 +175,14 @@ async function renderPage(): Promise<void> {
 
   const token = ++state.renderToken;
   const { page } = state;
+
+  // Needed to place highlights; cheap, and cached by the worker's page tree.
+  try {
+    state.pageSize = await invoke<PageDimensions>("page_size", { page });
+  } catch {
+    state.pageSize = null;
+  }
+  if (token !== state.renderToken) return;
 
   // Backing store is in device pixels so pages stay sharp on retina displays.
   const deviceZoom = state.zoom * window.devicePixelRatio;
@@ -153,6 +232,26 @@ function updateChrome(): void {
   element<HTMLButtonElement>("prev").disabled = info === null || state.page === 0;
   element<HTMLButtonElement>("next").disabled =
     info === null || state.page >= info.pageCount - 1;
+
+  updateSearchChrome();
+}
+
+function updateSearchChrome(): void {
+  const { query, hits, current, truncated } = state.search;
+  const count = element("search-count");
+
+  if (query === "") {
+    count.textContent = "";
+  } else if (hits.length === 0) {
+    count.textContent = "no matches";
+  } else {
+    const total = truncated ? `${hits.length}+` : `${hits.length}`;
+    count.textContent = `${current + 1} of ${total}`;
+  }
+
+  const noHits = hits.length === 0;
+  element<HTMLButtonElement>("search-prev").disabled = noHits;
+  element<HTMLButtonElement>("search-next").disabled = noHits;
 }
 
 async function goToPage(page: number): Promise<void> {
@@ -234,11 +333,74 @@ async function openDocument(): Promise<void> {
     state.document = info;
     state.page = 0;
     state.zoom = 1;
+    state.search = { query: "", hits: [], current: -1, truncated: false };
+    element<HTMLInputElement>("search-input").value = "";
     clearError();
     updateChrome();
     await renderPage();
   } catch (error) {
     showError(`Could not open document: ${String(error)}`);
+  }
+}
+
+/** Runs a search and jumps to the first hit. */
+async function runSearch(query: string): Promise<void> {
+  state.search.query = query;
+
+  if (query === "" || state.document === null) {
+    state.search.hits = [];
+    state.search.current = -1;
+    state.search.truncated = false;
+    updateSearchChrome();
+    drawHighlights();
+    return;
+  }
+
+  try {
+    // Case-insensitive by default: it is what people expect from a find box,
+    // and an exact-case toggle can come later if anyone asks.
+    const results = await invoke<SearchResults>("search", { query, matchCase: false });
+    state.search.hits = results.hits;
+    state.search.truncated = results.truncated;
+    state.search.current = results.hits.length > 0 ? 0 : -1;
+
+    updateSearchChrome();
+
+    if (results.hits.length === 0) {
+      // Must redraw explicitly: goToHit returns early with no hits, which
+      // previously left the last search's highlights on screen while the
+      // toolbar said "no matches".
+      drawHighlights();
+      return;
+    }
+
+    await goToHit(0);
+  } catch (error) {
+    showError(`Search failed: ${String(error)}`);
+  }
+}
+
+/** Moves to a hit by index, changing page if necessary. */
+async function goToHit(index: number): Promise<void> {
+  const { hits } = state.search;
+  if (hits.length === 0) return;
+
+  // Wrap around: reaching the end and starting over is what every find box
+  // does, and stopping dead at the last hit feels broken.
+  const wrapped = ((index % hits.length) + hits.length) % hits.length;
+  state.search.current = wrapped;
+
+  const hit = hits[wrapped];
+  if (hit === undefined) return;
+
+  updateSearchChrome();
+
+  if (hit.page !== state.page) {
+    state.page = hit.page;
+    updateChrome();
+    await renderPage();
+  } else {
+    drawHighlights();
   }
 }
 
@@ -292,8 +454,41 @@ function wireUp(): void {
   element("zoom-out").addEventListener("click", () => void stepZoom(-1));
   element("zoom-fit").addEventListener("click", () => void zoomToFit());
 
+  const searchInput = element<HTMLInputElement>("search-input");
+  let searchTimer: number | undefined;
+  searchInput.addEventListener("input", () => {
+    // Debounced: searching a long document on every keystroke would keep the
+    // worker permanently busy and make typing feel sticky.
+    window.clearTimeout(searchTimer);
+    searchTimer = window.setTimeout(() => void runSearch(searchInput.value), 250);
+  });
+  searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void goToHit(state.search.current + (event.shiftKey ? -1 : 1));
+    }
+  });
+
+  element("search-next").addEventListener("click", () =>
+    void goToHit(state.search.current + 1),
+  );
+  element("search-prev").addEventListener("click", () =>
+    void goToHit(state.search.current - 1),
+  );
+
   document.addEventListener("keydown", (event) => {
     if (state.document === null) return;
+
+    // Cmd/Ctrl+F focuses the find box, as every reader does.
+    if ((event.metaKey || event.ctrlKey) && event.key === "f") {
+      event.preventDefault();
+      element<HTMLInputElement>("search-input").select();
+      return;
+    }
+
+    // Don't hijack arrow keys while the user is typing in the find box.
+    if (document.activeElement === element("search-input")) return;
+
     switch (event.key) {
       case "ArrowRight":
       case "PageDown":

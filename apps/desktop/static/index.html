@@ -23,6 +23,13 @@
         <button id="zoom-fit" type="button">Fit</button>
       </div>
 
+      <div class="group" data-requires-document>
+        <input id="search-input" type="search" placeholder="Find in document" />
+        <button id="search-prev" type="button" title="Previous match">‹</button>
+        <span id="search-count"></span>
+        <button id="search-next" type="button" title="Next match">›</button>
+      </div>
+
       <span id="doc-name"></span>
       <span id="sandbox-badge" title="Worker confinement status"></span>
     </header>
@@ -33,7 +40,10 @@
         <p>Open a PDF to get started. Nothing leaves this machine.</p>
         <button id="open-empty" type="button" class="primary">Open a PDF…</button>
       </div>
-      <canvas id="page" hidden></canvas>
+      <div id="page-stack" hidden>
+        <canvas id="page"></canvas>
+        <canvas id="highlights"></canvas>
+      </div>
     </main>
 
     <div id="error" role="alert" hidden></div>

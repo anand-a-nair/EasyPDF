@@ -738,6 +738,7 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "easypdf-core"
 version = "0.0.0-dev"
 dependencies = [
+ "serde",
  "thiserror 2.0.20",
 ]
 
@@ -775,7 +776,9 @@ dependencies = [
 name = "easypdf-render"
 version = "0.0.0-dev"
 dependencies = [
+ "easypdf-core",
  "pdfium-render",
+ "serde",
  "thiserror 2.0.20",
 ]
 
