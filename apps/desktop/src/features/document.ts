@@ -1,6 +1,7 @@
 // Opening and closing documents, including the password flow.
 
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { commands, type DocumentInfo, type OpenError } from "../ipc.js";
 import { notify, resetDocumentState, state } from "../state.js";
@@ -9,6 +10,24 @@ import { applyFit } from "./navigation.js";
 import { loadOutline } from "./outline.js";
 
 type Prompt = (message: string) => Promise<string | null>;
+
+/**
+ * Puts the document name in the window title.
+ *
+ * Where a document name belongs on every desktop platform, and it means the
+ * toolbar does not have to spend space on it — at narrow widths the toolbar
+ * copy was being squeezed to a couple of characters, which is worse than not
+ * showing it at all.
+ *
+ * Failure is ignored: a wrong window title is not worth an error banner.
+ */
+async function setWindowTitle(name: string | null): Promise<void> {
+  try {
+    await getCurrentWindow().setTitle(name === null ? "EasyPDF" : `${name} — EasyPDF`);
+  } catch {
+    // Not fatal.
+  }
+}
 
 export async function openDocument(
   askForPassword: Prompt,
@@ -52,6 +71,7 @@ async function loadDocument(
       state.document = info;
       resetDocumentState();
       notify("document");
+      void setWindowTitle(info.name);
 
       invalidate(true);
       await applyFit("fit-page");

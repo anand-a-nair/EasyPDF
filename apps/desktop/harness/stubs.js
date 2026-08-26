@@ -118,6 +118,11 @@ export function createInternals(state) {
     transformCallback: (callback) => callback,
     unregisterCallback: () => {},
     invoke: async (cmd, args = {}) => {
+      // Window operations come through the same channel as commands.
+      if (cmd.startsWith("plugin:window|") || cmd.startsWith("plugin:webview|")) {
+        state.calls.push({ cmd, args });
+        return null;
+      }
       state.calls.push({ cmd, args });
       if (state.failCommand === cmd) {
         throw new Error(`${cmd} not allowed. Permissions associated with this command: ...`);

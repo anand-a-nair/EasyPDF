@@ -43,10 +43,26 @@ body {
 
 /* Toolbar ---------------------------------------------------------------- */
 
+/* Wraps rather than clips.
+ *
+ * Nothing here was allowed to shrink below its content, so in a narrow window
+ * every control was squeezed and truncated — "Open…" rendered as "Open." and
+ * the document name and status badge were pushed off the edge entirely.
+ *
+ * Wrapping keeps every control reachable, which matters more than keeping the
+ * toolbar one row tall: a hidden control is a broken control. The toolbar grows
+ * downward and the viewport shrinks to match, because the layout is a flex
+ * column.
+ *
+ * When Phase 2 adds annotation tools this will want a real overflow menu
+ * instead — see ideas/13-frontend-architecture.md. Wrapping is the right
+ * behaviour until the row count becomes the problem. */
 #toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 1rem;
+  column-gap: 0.65rem;
+  row-gap: 0.4rem;
   flex: 0 0 auto;
   padding: 0.5rem 0.75rem;
   background: var(--surface);
@@ -58,12 +74,17 @@ body {
   display: flex;
   align-items: center;
   gap: 0.25rem;
+  /* Groups move to the next row intact rather than being split or squeezed. */
+  flex: 0 0 auto;
 }
 
 .group[data-requires-document] { display: none; }
 body.has-document .group[data-requires-document] { display: flex; }
 
 button {
+  /* Never shrink below the label: a truncated button reads as a bug. */
+  flex: 0 0 auto;
+  white-space: nowrap;
   min-width: 2rem;
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--border);
@@ -85,14 +106,25 @@ button.primary {
 }
 
 #page-indicator, #zoom-indicator {
+  flex: 0 0 auto;
   min-width: 4.5rem;
   text-align: center;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
+/* The one element that gives way. A long file name truncates with an ellipsis
+   instead of pushing the controls off the edge. */
 #doc-name {
-  margin-left: auto;
+  /* `flex-basis: 0` rather than `auto`, and grow to fill: with an `auto` basis
+     a long file name measures at its full width, overflows the line and pushes
+     the whole group onto a second row. From zero it simply takes whatever space
+     is left and truncates, so it never costs the toolbar a row.
+     `flex-grow` also does the job `margin-left: auto` was doing, without the
+     auto margin competing for space during wrapping. */
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: right;
   color: var(--muted);
   max-width: 30ch;
   overflow: hidden;
@@ -101,6 +133,8 @@ button.primary {
 }
 
 #sandbox-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -291,7 +325,9 @@ button.active {
 }
 
 #search-input {
-  width: 12rem;
+  /* Shrinks before it wraps, but not below something typeable. */
+  flex: 0 1 12rem;
+  min-width: 7rem;
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -301,7 +337,8 @@ button.active {
 }
 
 #search-count {
-  min-width: 5.5rem;
+  flex: 0 0 auto;
+  min-width: 4.5rem;
   text-align: center;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -320,7 +357,8 @@ button.active {
 }
 
 #search-count {
-  min-width: 5.5rem;
+  flex: 0 0 auto;
+  min-width: 4.5rem;
   text-align: center;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -342,6 +380,39 @@ button.active {
 #empty-state p { margin: 0 0 1.5rem; }
 
 body.has-document #empty-state { display: none; }
+
+/* Narrow windows ----------------------------------------------------------
+ *
+ * Controls are what the toolbar is for, so the informational bits give way
+ * first: the document name, then the status badge's label. Both stay reachable
+ * — the name is in the window title and the badge keeps its tooltip — and
+ * dropping them keeps the toolbar on one row several hundred pixels longer
+ * than it otherwise would. */
+
+/* The window title carries the document name, so the toolbar copy is a
+   convenience that disappears as soon as it would be squeezed to a few
+   useless characters. */
+@media (max-width: 1400px) {
+  #doc-name { display: none; }
+}
+
+@media (max-width: 900px) {
+  /* Shrinks to a coloured dot. The full status stays in the tooltip, and the
+     warning colour is the part that must remain visible. */
+  #sandbox-badge {
+    width: 0.6rem;
+    height: 0.6rem;
+    min-width: 0;
+    padding: 0;
+    border-radius: 50%;
+    overflow: hidden;
+    text-indent: 100%;
+    background: var(--muted);
+    border-color: transparent;
+  }
+
+  #sandbox-badge.warn { background: var(--warn); }
+}
 
 /* Errors ----------------------------------------------------------------- */
 
