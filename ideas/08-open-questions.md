@@ -53,6 +53,17 @@ it deserves an explicit carve-out rather than a quiet exception).
 
 ## OQ-004 — Code signing and notarization
 
+> **ACTION ITEM — blocks the shipping pipeline.**
+> Deferred deliberately on 2026-08-25. The GitHub release pipeline can be built
+> and can produce installable artifacts without this, but **those artifacts are
+> not safely distributable**: macOS Gatekeeper and Windows SmartScreen both
+> warn on unsigned binaries, and telling users to click through a security
+> warning is a poor look for a tool whose entire pitch is trustworthiness.
+>
+> Must be resolved before the pipeline is announced or linked publicly.
+> Needs the maintainer: it costs money annually and the certificates cannot be
+> obtained by anyone else.
+
 Shipping on macOS and Windows without signing means scary OS warnings. Apple
 Developer membership and a Windows code-signing certificate both cost real money
 annually.

@@ -17,105 +17,14 @@
       Open: http://localhost:8731/harness/
     -->
     <link rel="stylesheet" href="../dist/styles.css" />
-    <script>
-      // Stands in for Tauri so the real frontend bundle can be exercised in a
-      // plain browser. Development harness only — never shipped.
-      // Set window.__harness.failCommand = "plugin:dialog|open" to simulate a
-      // denied permission. Regression cover for the capability bug: the app
-      // once had no capability file at all, so the dialog call rejected and
-      // the click did nothing visible whatsoever.
-      window.__harness = { calls: [], errors: [], failCommand: null, pageCount: 3,
-                           requirePassword: null, outline: [] };
+    <script type="module">
+      // Stubs live in stubs.js so the contract checker can import the same
+      // definitions the harness runs against.
+      import { createState, createInternals } from "./stubs.js";
+
+      window.__harness = createState();
       window.addEventListener("error", (e) => window.__harness.errors.push(String(e.message)));
-
-      function fakePage(width, height) {
-        const buffer = new ArrayBuffer(8 + width * height * 4);
-        const view = new DataView(buffer);
-        view.setUint32(0, width, true);
-        view.setUint32(4, height, true);
-        const pixels = new Uint8Array(buffer, 8);
-        for (let i = 0; i < pixels.length; i += 4) {
-          const dark = i % 400 < 40;
-          pixels[i] = dark ? 20 : 255;
-          pixels[i + 1] = dark ? 20 : 255;
-          pixels[i + 2] = dark ? 20 : 255;
-          pixels[i + 3] = 255;
-        }
-        return buffer;
-      }
-
-      window.__TAURI_INTERNALS__ = {
-        transformCallback: (cb) => cb,
-        unregisterCallback: () => {},
-        invoke: async (cmd, args) => {
-          window.__harness.calls.push({ cmd, args });
-          if (window.__harness.failCommand === cmd) {
-            throw new Error(`${cmd} not allowed. Permissions associated with this command: ...`);
-          }
-          switch (cmd) {
-            case "worker_status":
-              return { running: true, sandboxed: true, detail: "confined via seatbelt",
-                       memoryCapped: false,
-                       engineAvailable: window.__harness.engineAvailable !== false };
-            case "plugin:dialog|open":
-              return "/fake/example.pdf";
-            case "text_layout": {
-              // Twelve characters laid out left to right on one line, so a
-              // drag across them selects a predictable substring.
-              const word = "Hello EasyPDF";
-              return {
-                chars: [...word].map((ch, i) => ({
-                  text: ch,
-                  rect: { left: 20 + i * 12, bottom: 40, right: 20 + i * 12 + 12, top: 64 },
-                })),
-                truncated: false,
-              };
-            }
-            case "outline":
-              return window.__harness.outline;
-            case "open_document":
-              // Simulates an encrypted document: rejects until the right
-              // password arrives, in the shape the Rust side actually sends.
-              if (window.__harness.requirePassword &&
-                  args.password !== window.__harness.requirePassword) {
-                throw { needsPassword: true, message: "This document is password protected." };
-              }
-              return { name: "example.pdf", pageCount: window.__harness.pageCount ?? 3, encrypted: !!window.__harness.requirePassword };
-            case "__unused_open_document":
-              return { name: "example.pdf", pageCount: window.__harness.pageCount ?? 3, encrypted: false };
-            case "render_page": {
-              // Mirror the real renderer: a quarter turn swaps the axes.
-              // A stub that ignores rotation would let a broken rotation
-              // path pass its own test.
-              const quarter = args.rotation === 90 || args.rotation === 270;
-              const w = quarter ? 100 : 200, h = quarter ? 200 : 100;
-              return fakePage(Math.round(w * args.zoom), Math.round(h * args.zoom));
-            }
-            case "page_size":
-              // Always unrotated, as the real command returns.
-              return { width: 200, height: 100 };
-            case "extract_text":
-              return "Hello EasyPDF";
-            case "search":
-              if (!args.query) return { hits: [], truncated: false };
-              if (args.query === "nomatch") return { hits: [], truncated: false };
-              // Page 0 hit near the BOTTOM of the page (bottom=10),
-              // page 2 hit near the TOP (bottom=80). If the coordinate flip is
-              // wrong these land on the wrong side and the test catches it.
-              return {
-                hits: [
-                  { page: 0, rects: [{ left: 20, bottom: 10, right: 90, top: 30 }] },
-                  { page: 2, rects: [{ left: 20, bottom: 80, right: 90, top: 95 }] },
-                ],
-                truncated: false,
-              };
-            case "close_document":
-              return null;
-            default:
-              throw new Error(`unstubbed command: ${cmd}`);
-          }
-        },
-      };
+      window.__TAURI_INTERNALS__ = createInternals(window.__harness);
     </script>
   </head>
   <body>

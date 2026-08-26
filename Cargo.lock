@@ -756,6 +756,7 @@ dependencies = [
  "easypdf-core",
  "easypdf-ffi",
  "easypdf-render",
+ "easypdf-session",
  "serde",
  "tauri",
  "tauri-build",
@@ -780,6 +781,17 @@ dependencies = [
  "pdfium-render",
  "serde",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "easypdf-session"
+version = "0.0.0-dev"
+dependencies = [
+ "easypdf-core",
+ "easypdf-ffi",
+ "easypdf-render",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

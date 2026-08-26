@@ -1,0 +1,14 @@
+{
+  "chars": [
+    {
+      "rect": {
+        "bottom": 40.0,
+        "left": 20.0,
+        "right": 32.0,
+        "top": 64.0
+      },
+      "text": "H"
+    }
+  ],
+  "truncated": false
+}

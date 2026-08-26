@@ -1,6 +1,6 @@
 [package]
-name = "easypdf-desktop"
-description = "EasyPDF desktop shell."
+name = "easypdf-session"
+description = "Document session: owns the worker, the tile cache, and the open document."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,17 +9,14 @@ repository.workspace = true
 authors.workspace = true
 publish.workspace = true
 
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
-
 [dependencies]
-tauri = { version = "2", features = [] }
-serde.workspace = true
 easypdf-core.workspace = true
-easypdf-render.workspace = true
 easypdf-ffi.workspace = true
-easypdf-session.workspace = true
-tauri-plugin-dialog = "2.7.2"
+easypdf-render.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+serde_json = "1"

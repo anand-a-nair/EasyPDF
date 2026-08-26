@@ -7,15 +7,15 @@
 // Suppress the extra console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod session;
-
 use std::path::PathBuf;
 
 use easypdf_core::{Document, Page, PageSize, Rotation};
 use easypdf_ffi::protocol::SandboxStatus;
 use easypdf_ffi::worker::Worker;
+use easypdf_session::{
+    DocumentInfo, OpenError, PageDimensions, SearchResults, Session, WorkerStatus,
+};
 use serde::Serialize;
-use session::{DocumentInfo, OpenError, Session};
 use tauri::State;
 use tauri::ipc::Response as IpcResponse;
 
@@ -25,23 +25,6 @@ use tauri::ipc::Response as IpcResponse;
 struct CoreStatus {
     version: String,
     page_count: usize,
-}
-
-/// What the shell knows about the sandboxed worker.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WorkerStatus {
-    running: bool,
-    sandboxed: bool,
-    /// Whether the worker has a PDF engine. False is a packaging fault.
-    engine_available: bool,
-    /// Human-readable detail: the mechanism, or why confinement is absent.
-    detail: String,
-    /// Whether a kernel-enforced memory ceiling is in place.
-    ///
-    /// False on macOS, which provides no working `RLIMIT_AS`. Surfaced rather
-    /// than hidden so the gap is visible.
-    memory_capped: bool,
 }
 
 /// Locates the worker binary.
@@ -184,14 +167,6 @@ fn page_size(page: usize, session: State<'_, Session>) -> Result<PageDimensions,
     Ok(PageDimensions { width, height })
 }
 
-/// Page dimensions in points.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PageDimensions {
-    width: f32,
-    height: f32,
-}
-
 /// Extracts a page's text.
 #[tauri::command]
 fn extract_text(page: usize, session: State<'_, Session>) -> Result<String, String> {
@@ -207,15 +182,6 @@ fn search(
 ) -> Result<SearchResults, String> {
     let (hits, truncated) = session.search(&query, match_case)?;
     Ok(SearchResults { hits, truncated })
-}
-
-/// Search results, with an honest truncation flag.
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchResults {
-    hits: Vec<easypdf_core::text::SearchHit>,
-    /// Whether the hit list was capped. Shown to the user rather than hidden.
-    truncated: bool,
 }
 
 /// Closes the open document and frees its cached tiles.

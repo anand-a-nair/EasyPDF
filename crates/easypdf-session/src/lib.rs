@@ -1,8 +1,22 @@
 //! Document session: owns the worker, the tile cache, and the open document.
 //!
-//! This is the only place in the shell that holds state. Everything here is
-//! orchestration — no PDF logic, which lives in the crates. See
-//! `ideas/02-architecture.md`.
+//! Orchestration only — no PDF logic, which lives in `easypdf-render` and
+//! `easypdf-core`. See `ideas/02-architecture.md`.
+//!
+//! This is a library rather than part of the desktop binary so it can be
+//! tested directly. It previously lived inside the Tauri shell, where nothing
+//! could reach it: the shell is a binary, and a binary's internals are not
+//! addressable from an integration test. Everything the app actually *does*
+//! with a document was therefore only exercised through the UI.
+//!
+//! Being a library also keeps the shell honest. The architecture doc says
+//! business logic in the shell is a code smell; with the logic here, the shell
+//! is left with window management and a thin command layer, which is what it
+//! is supposed to be.
+
+// Tests legitimately assert on known-good values; the panic lints exist to
+// keep unwraps out of parsing paths, not out of assertions.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used, clippy::panic))]
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -24,7 +38,7 @@ const CACHE_BUDGET_BYTES: usize = 96 * 1024 * 1024;
 /// What the frontend needs to know about an open document.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct DocumentInfo {
+pub struct DocumentInfo {
     /// File name only — never the full path, which the UI has no use for.
     pub name: String,
     /// Number of pages.
@@ -40,7 +54,7 @@ pub(crate) struct DocumentInfo {
 /// a broken file.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct OpenError {
+pub struct OpenError {
     /// True when the document needs a password, or the one given was wrong.
     pub needs_password: bool,
     /// Human-readable detail.
@@ -48,18 +62,63 @@ pub(crate) struct OpenError {
 }
 
 impl OpenError {
-    fn failed(message: String) -> Self {
+    /// An ordinary failure, with detail.
+    #[must_use]
+    pub fn failed(message: String) -> Self {
         Self { needs_password: false, message }
     }
 
-    fn password_required() -> Self {
+    /// The document needs a password, or the one supplied was wrong.
+    #[must_use]
+    pub fn password_required() -> Self {
         Self { needs_password: true, message: "This document is password protected.".to_owned() }
     }
 }
 
+/// A page's dimensions in points.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageDimensions {
+    /// Width in points.
+    pub width: f32,
+    /// Height in points.
+    pub height: f32,
+}
+
+/// Search results, with an honest truncation flag.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResults {
+    /// Positioned hits, in document order.
+    pub hits: Vec<SearchHit>,
+    /// Whether the hit list was capped. Shown to the user rather than hidden.
+    pub truncated: bool,
+}
+
+/// What the shell knows about the worker process.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerStatus {
+    /// Whether the worker started at all.
+    pub running: bool,
+    /// Whether it confined itself.
+    pub sandboxed: bool,
+    /// Human-readable detail: the mechanism, or why confinement is absent.
+    pub detail: String,
+    /// Whether a kernel-enforced memory ceiling is in place.
+    ///
+    /// False on macOS, which provides no working `RLIMIT_AS`. Surfaced rather
+    /// than hidden so the gap is visible.
+    pub memory_capped: bool,
+    /// Whether the worker has a PDF engine. False is a packaging fault.
+    pub engine_available: bool,
+}
+
 /// A rendered page, ready for the canvas.
-pub(crate) struct RenderedPage {
+pub struct RenderedPage {
+    /// Width in pixels.
     pub width: u32,
+    /// Height in pixels.
     pub height: u32,
     /// RGBA pixel data, converted from PDFium's BGRA.
     pub pixels: Vec<u8>,
@@ -67,7 +126,7 @@ pub(crate) struct RenderedPage {
 
 impl RenderedPage {
     /// Packs the page for transport. See `easypdf_render::wire`.
-    pub(crate) fn into_wire_format(self) -> Vec<u8> {
+    pub fn into_wire_format(self) -> Vec<u8> {
         easypdf_render::wire::encode_page(self.width, self.height, &self.pixels)
     }
 }
@@ -80,7 +139,7 @@ struct OpenDocument {
 }
 
 /// The shell's document state.
-pub(crate) struct Session {
+pub struct Session {
     worker_path: PathBuf,
     worker: Mutex<Option<Worker>>,
     cache: Mutex<TileCache>,
@@ -90,7 +149,7 @@ pub(crate) struct Session {
 impl Session {
     /// Creates an empty session. No worker is spawned until a document opens.
     #[must_use]
-    pub(crate) fn new(worker_path: PathBuf) -> Self {
+    pub fn new(worker_path: PathBuf) -> Self {
         Self {
             worker_path,
             worker: Mutex::new(None),
@@ -102,11 +161,7 @@ impl Session {
     /// Opens a document from disk.
     ///
     /// The host reads the file; the worker never sees a path. See D-019.
-    pub(crate) fn open(
-        &self,
-        path: &Path,
-        password: Option<String>,
-    ) -> Result<DocumentInfo, OpenError> {
+    pub fn open(&self, path: &Path, password: Option<String>) -> Result<DocumentInfo, OpenError> {
         let bytes = std::fs::read(path)
             .map_err(|error| OpenError::failed(format!("could not read file: {error}")))?;
 
@@ -144,7 +199,7 @@ impl Session {
     }
 
     /// A page's characters and their positions, for text selection.
-    pub(crate) fn text_layout(&self, page: usize) -> Result<TextLayout, String> {
+    pub fn text_layout(&self, page: usize) -> Result<TextLayout, String> {
         match self.send(&Request::TextLayout { page }).map_err(|e| e.to_string())? {
             Response::TextLayout { layout } => Ok(layout),
             Response::Failed(error) => Err(error.to_string()),
@@ -153,7 +208,7 @@ impl Session {
     }
 
     /// The document outline (bookmarks), empty when there is none.
-    pub(crate) fn outline(&self) -> Result<Vec<OutlineEntry>, String> {
+    pub fn outline(&self) -> Result<Vec<OutlineEntry>, String> {
         match self.send(&Request::Outline).map_err(|e| e.to_string())? {
             Response::Outline { entries } => Ok(entries),
             Response::Failed(error) => Err(error.to_string()),
@@ -162,12 +217,7 @@ impl Session {
     }
 
     /// Renders a page, serving from cache when possible.
-    pub(crate) fn render(
-        &self,
-        page: usize,
-        zoom: f32,
-        rotation: i32,
-    ) -> Result<RenderedPage, String> {
+    pub fn render(&self, page: usize, zoom: f32, rotation: i32) -> Result<RenderedPage, String> {
         let key = TileKey { page, zoom: ZoomBucket::from_zoom(zoom), rotation };
 
         if let Ok(mut cache) = self.cache.lock()
@@ -200,7 +250,7 @@ impl Session {
     }
 
     /// A page's size in points, without rendering it.
-    pub(crate) fn page_size(&self, page: usize) -> Result<(f32, f32), String> {
+    pub fn page_size(&self, page: usize) -> Result<(f32, f32), String> {
         let response = self.send(&Request::PageSize { page }).map_err(|error| error.to_string())?;
 
         match response {
@@ -211,7 +261,7 @@ impl Session {
     }
 
     /// Extracts a page's text.
-    pub(crate) fn extract_text(&self, page: usize) -> Result<String, String> {
+    pub fn extract_text(&self, page: usize) -> Result<String, String> {
         match self.send(&Request::ExtractText { page }).map_err(|e| e.to_string())? {
             Response::TextExtracted { text } => Ok(text),
             Response::Failed(error) => Err(error.to_string()),
@@ -220,11 +270,7 @@ impl Session {
     }
 
     /// Searches the whole document.
-    pub(crate) fn search(
-        &self,
-        query: &str,
-        match_case: bool,
-    ) -> Result<(Vec<SearchHit>, bool), String> {
+    pub fn search(&self, query: &str, match_case: bool) -> Result<(Vec<SearchHit>, bool), String> {
         let request = Request::Search { query: query.to_owned(), match_case };
         match self.send(&request).map_err(|e| e.to_string())? {
             Response::SearchResults { hits, truncated } => Ok((hits, truncated)),
@@ -234,7 +280,7 @@ impl Session {
     }
 
     /// Closes the document and releases its memory.
-    pub(crate) fn close(&self) -> Result<(), String> {
+    pub fn close(&self) -> Result<(), String> {
         let _ = self.send(&Request::CloseDocument);
         *self.document.lock().map_err(|_| "document lock poisoned")? = None;
         self.cache.lock().map_err(|_| "cache lock poisoned")?.clear();
@@ -242,7 +288,7 @@ impl Session {
     }
 
     /// Currently open document, if any.
-    pub(crate) fn info(&self) -> Option<DocumentInfo> {
+    pub fn info(&self) -> Option<DocumentInfo> {
         self.document.lock().ok()?.as_ref().map(|d| d.info.clone())
     }
 

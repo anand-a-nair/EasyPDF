@@ -17,6 +17,7 @@ publish = false
 [workspace.dependencies]
 easypdf-core = { path = "crates/easypdf-core" }
 easypdf-render = { path = "crates/easypdf-render" }
+easypdf-session = { path = "crates/easypdf-session" }
 easypdf-crypto = { path = "crates/easypdf-crypto" }
 easypdf-ffi = { path = "crates/easypdf-ffi" }
 

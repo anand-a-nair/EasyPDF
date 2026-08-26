@@ -36,6 +36,15 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features
       - run: cargo test --workspace --all-features
 
+      # The harness stubs Tauri so the frontend is testable without an app.
+      # A stub that drifts from the real payload makes the harness pass while
+      # the app is broken, so the two are checked against each other.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Contract — harness stubs versus real payloads
+        run: node scripts/check-contracts.mjs
+
   frontend:
     name: Frontend typecheck
     runs-on: ubuntu-latest

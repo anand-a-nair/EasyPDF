@@ -1,0 +1,16 @@
+{
+  "hits": [
+    {
+      "page": 0,
+      "rects": [
+        {
+          "bottom": 40.0,
+          "left": 20.0,
+          "right": 90.0,
+          "top": 64.0
+        }
+      ]
+    }
+  ],
+  "truncated": false
+}
