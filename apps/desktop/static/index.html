@@ -10,6 +10,8 @@
     <header id="toolbar">
       <button id="open" type="button" class="primary">Open…</button>
 
+      <div class="group" data-requires-document id="panel-buttons"></div>
+
       <div class="group" data-requires-document>
         <button id="prev" type="button" title="Previous page">‹</button>
         <span id="page-indicator">— / —</span>
@@ -32,7 +34,6 @@
       <div class="group" data-requires-document>
         <button id="view-page" type="button" class="active" title="One page at a time">Page</button>
         <button id="view-scroll" type="button" title="Continuous scrolling">Scroll</button>
-        <button id="toggle-outline" type="button" title="Show outline">Outline</button>
       </div>
 
       <div class="group" data-requires-document>
@@ -43,25 +44,23 @@
       </div>
 
       <span id="doc-name"></span>
-      <span id="sandbox-badge" title="Worker confinement status"></span>
+      <span id="sandbox-badge" title="Worker status"></span>
     </header>
 
     <div id="workspace">
-      <aside id="outline" hidden>
-        <h2>Outline</h2>
-        <ul id="outline-list"></ul>
-        <p id="outline-empty" hidden>This document has no outline.</p>
-      </aside>
+      <aside id="sidebar" hidden></aside>
 
       <main id="viewport">
-      <div id="empty-state">
-        <h1>EasyPDF</h1>
-        <p>Open a PDF to get started. Nothing leaves this machine.</p>
-        <button id="open-empty" type="button" class="primary">Open a PDF…</button>
-      </div>
+        <div id="empty-state">
+          <h1>EasyPDF</h1>
+          <p>Open a PDF to get started. Nothing leaves this machine.</p>
+          <button id="open-empty" type="button" class="primary">Open a PDF…</button>
+        </div>
         <div id="pages" hidden></div>
       </main>
     </div>
+
+    <div id="error" role="alert" hidden></div>
 
     <dialog id="password-dialog">
       <h2>Password required</h2>
@@ -73,8 +72,6 @@
         <button id="password-submit" type="button" class="primary">Open</button>
       </div>
     </dialog>
-
-    <div id="error" role="alert" hidden></div>
 
     <script type="module" src="main.js"></script>
   </body>

@@ -45,6 +45,7 @@ The canonical version is in [`.version`](.version).
 ### Notes
 - Page viewer: open a PDF, navigate pages, zoom, fit to window, with
   progressive rendering and a memory-bounded tile cache
+- Page thumbnail sidebar, with only visible thumbnails held in memory
 - Text selection and copy, with select-all and keyboard shortcuts
 - Password-protected documents, with retry on a wrong password
 - Page rotation

@@ -17,6 +17,7 @@ before they get made in a directory structure.
 | [10-strategy.md](10-strategy.md) | How an open tool actually takes on Adobe |
 | [11-sustainability.md](11-sustainability.md) | Funding the work without charging users |
 | [12-build-and-release.md](12-build-and-release.md) | Toolchain, CI matrix, versioning, release checklist |
+| [13-frontend-architecture.md](13-frontend-architecture.md) | UI structure, the layer/tool/panel seams, and how to add a feature |
 
 ## How to use this folder
 

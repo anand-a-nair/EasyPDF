@@ -3,23 +3,19 @@
   <head>
     <meta charset="UTF-8" />
     <title>EasyPDF frontend harness</title>
+    <link rel="stylesheet" href="../dist/styles.css" />
     <!--
       Exercises the real frontend bundle in a plain browser with Tauri stubbed
       out. Development tool, never shipped — it lives outside dist/ so it
       cannot end up in a build.
 
-      This exists because the frontend once shipped completely broken: tsc
-      emitted bare module specifiers ("@tauri-apps/api/core") that no webview
-      can resolve, so the script failed to load and nothing worked at all. No
-      Rust test could have caught it. Loading the real bundle here does.
+      The markup mirrors the app's. `scripts/check-contracts.mjs` keeps the
+      stubs in stubs.js honest against the real Rust payloads.
 
       Run:  python3 -m http.server 8731 --directory apps/desktop
       Open: http://localhost:8731/harness/
     -->
-    <link rel="stylesheet" href="../dist/styles.css" />
     <script type="module">
-      // Stubs live in stubs.js so the contract checker can import the same
-      // definitions the harness runs against.
       import { createState, createInternals } from "./stubs.js";
 
       window.__harness = createState();
@@ -30,51 +26,59 @@
   <body>
     <header id="toolbar">
       <button id="open" type="button" class="primary">Open…</button>
+
+      <div class="group" data-requires-document id="panel-buttons"></div>
+
       <div class="group" data-requires-document>
-        <button id="prev" type="button">‹</button>
+        <button id="prev" type="button" title="Previous page">‹</button>
         <span id="page-indicator">— / —</span>
-        <button id="next" type="button">›</button>
+        <button id="next" type="button" title="Next page">›</button>
       </div>
+
       <div class="group" data-requires-document>
-        <button id="zoom-out" type="button">−</button>
+        <button id="zoom-out" type="button" title="Zoom out">−</button>
         <span id="zoom-indicator">100%</span>
-        <button id="zoom-in" type="button">+</button>
-        <button id="zoom-fit" type="button">Fit</button>
-        <button id="zoom-fit-width" type="button">Width</button>
+        <button id="zoom-in" type="button" title="Zoom in">+</button>
+        <button id="zoom-fit" type="button" title="Fit whole page">Fit</button>
+        <button id="zoom-fit-width" type="button" title="Fit page width">Width</button>
       </div>
+
       <div class="group" data-requires-document>
-        <button id="rotate-left" type="button">↺</button>
-        <button id="rotate-right" type="button">↻</button>
+        <button id="rotate-left" type="button" title="Rotate left">↺</button>
+        <button id="rotate-right" type="button" title="Rotate right">↻</button>
       </div>
+
       <div class="group" data-requires-document>
-        <button id="view-page" type="button" class="active">Page</button>
-        <button id="view-scroll" type="button">Scroll</button>
-        <button id="toggle-outline" type="button">Outline</button>
+        <button id="view-page" type="button" class="active" title="One page at a time">Page</button>
+        <button id="view-scroll" type="button" title="Continuous scrolling">Scroll</button>
       </div>
+
       <div class="group" data-requires-document>
         <input id="search-input" type="search" placeholder="Find in document" />
-        <button id="search-prev" type="button">‹</button>
+        <button id="search-prev" type="button" title="Previous match">‹</button>
         <span id="search-count"></span>
-        <button id="search-next" type="button">›</button>
+        <button id="search-next" type="button" title="Next match">›</button>
       </div>
+
       <span id="doc-name"></span>
-      <span id="sandbox-badge"></span>
+      <span id="sandbox-badge" title="Worker status"></span>
     </header>
+
     <div id="workspace">
-      <aside id="outline" hidden>
-        <h2>Outline</h2>
-        <ul id="outline-list"></ul>
-        <p id="outline-empty" hidden>This document has no outline.</p>
-      </aside>
+      <aside id="sidebar" hidden></aside>
+
       <main id="viewport">
-      <div id="empty-state">
-        <h1>EasyPDF</h1>
-        <p>Open a PDF to get started.</p>
-        <button id="open-empty" type="button" class="primary">Open a PDF…</button>
-      </div>
+        <div id="empty-state">
+          <h1>EasyPDF</h1>
+          <p>Open a PDF to get started. Nothing leaves this machine.</p>
+          <button id="open-empty" type="button" class="primary">Open a PDF…</button>
+        </div>
         <div id="pages" hidden></div>
       </main>
     </div>
+
+    <div id="error" role="alert" hidden></div>
+
     <dialog id="password-dialog">
       <h2>Password required</h2>
       <p id="password-message">This document is password protected.</p>
@@ -85,7 +89,7 @@
         <button id="password-submit" type="button" class="primary">Open</button>
       </div>
     </dialog>
-    <div id="error" role="alert" hidden></div>
+
     <script type="module" src="../dist/main.js"></script>
   </body>
 </html>
