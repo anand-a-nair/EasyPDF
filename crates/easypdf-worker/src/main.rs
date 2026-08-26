@@ -22,7 +22,7 @@ mod selftest;
 use std::io::{self, BufReader, BufWriter};
 use std::path::PathBuf;
 
-use easypdf_ffi::framing::{FrameError, read_frame, write_frame};
+use easypdf_ffi::framing::{FrameError, read_frame, write_blob, write_frame};
 use easypdf_ffi::protocol::{Request, Response, SandboxStatus, WorkerError};
 use easypdf_render::cache::{TileKey, ZoomBucket};
 use easypdf_render::pdfium::{OpenDocument, PdfiumRasterizer};
@@ -144,10 +144,36 @@ fn main() {
 
         let response = handle(&request, &sandbox_status, &mut session);
 
-        if let Err(error) = write_frame(&mut stdout, &response) {
+        if let Err(error) = send(&mut stdout, response) {
+            // Previously this exited the loop, which killed the worker for the
+            // rest of the session: the host's next write then failed with
+            // "broken pipe" and the user saw that instead of the real problem.
+            // One unsendable response must not end the process — report it and
+            // carry on, so the next request still works.
             eprintln!("easypdf-worker: could not send response: {error}");
-            break;
+
+            let refusal = Response::Failed(WorkerError::Malformed(format!(
+                "the result could not be sent: {error}"
+            )));
+            if write_frame(&mut stdout, &refusal).is_err() {
+                // The channel itself is gone; there is nothing left to say.
+                break;
+            }
         }
+    }
+}
+
+/// Sends a response, with pixels as a separate binary frame.
+fn send<W: std::io::Write>(writer: &mut W, response: Response) -> Result<(), FrameError> {
+    match response {
+        Response::PageRendered { width, height, byte_len, pixels } => {
+            write_frame(
+                writer,
+                &Response::PageRendered { width, height, byte_len, pixels: Vec::new() },
+            )?;
+            write_blob(writer, &pixels)
+        }
+        other => write_frame(writer, &other),
     }
 }
 
@@ -207,6 +233,7 @@ fn handle(request: &Request, sandbox_status: &SandboxStatus, session: &mut Sessi
                 Ok(tile) => Response::PageRendered {
                     width: tile.width,
                     height: tile.height,
+                    byte_len: tile.pixels.len(),
                     pixels: tile.pixels,
                 },
                 Err(error) => Response::Failed(WorkerError::Malformed(error.to_string())),

@@ -224,7 +224,8 @@ fn renders_a_page_inside_the_sandbox() {
         worker.request(&Request::RenderPage { page: 0, zoom: 1.0, rotation: 0 }).unwrap();
 
     match response {
-        Response::PageRendered { width, height, pixels } => {
+        Response::PageRendered { width, height, pixels, byte_len } => {
+            assert_eq!(byte_len, pixels.len(), "declared length must match the blob");
             assert_eq!(width, 200);
             assert_eq!(height, 100);
             assert_eq!(pixels.len(), 200 * 100 * 4);
@@ -545,4 +546,60 @@ fn handshake_reports_whether_an_engine_is_present() {
         pdfium_available(),
         "engine availability should match whether PDFium is vendored"
     );
+}
+
+#[test]
+fn a_large_high_zoom_render_survives_the_channel() {
+    // Regression for a real failure: a scanned page at 294% zoom on a retina
+    // display is ~66 MB of pixels. Those pixels used to be serialised inside
+    // the JSON response, where a Vec<u8> becomes decimal digits and commas —
+    // a 3.6x expansion, so ~236 MB. A slightly larger page crossed the frame
+    // limit, the worker failed to send, and it *exited*; every later request
+    // then failed with "broken pipe".
+    //
+    // The fixture page is small, so the zoom is large. What matters is the
+    // byte count, which is comfortably past what JSON encoding could carry.
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    // 200x100 points at 30x is 6000x3000 px = 72 MB of pixels.
+    let response = worker
+        .request(&Request::RenderPage { page: 0, zoom: 30.0, rotation: 0 })
+        .expect("a large render must not break the channel");
+
+    match response {
+        Response::PageRendered { width, height, byte_len, pixels } => {
+            assert_eq!((width, height), (6000, 3000));
+            assert_eq!(byte_len, pixels.len());
+            assert!(
+                pixels.len() > 64 * 1024 * 1024,
+                "expected a payload past what JSON could carry, got {}",
+                pixels.len()
+            );
+        }
+        other => panic!("expected PageRendered, got {other:?}"),
+    }
+
+    // And the worker is still alive afterwards, which is the part that used to
+    // fail: one oversized response killed it for the rest of the session.
+    assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
+}
+
+#[test]
+fn an_impossible_render_is_refused_without_killing_the_worker() {
+    // A zoom absurd enough to exceed the bitmap ceiling must come back as a
+    // refusal, not as a dead channel.
+    require_pdfium!();
+    let mut worker = spawn();
+
+    worker.request(&Request::OpenDocument { data: corpus("minimal.pdf"), password: None }).unwrap();
+
+    let response = worker
+        .request(&Request::RenderPage { page: 0, zoom: 5000.0, rotation: 0 })
+        .expect("the channel must survive a refused render");
+    assert!(matches!(response, Response::Failed(_)), "{response:?}");
+
+    assert_eq!(worker.request(&Request::CloseDocument).unwrap(), Response::Ok);
 }

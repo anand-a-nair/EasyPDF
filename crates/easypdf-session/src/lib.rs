@@ -235,7 +235,7 @@ impl Session {
             .map_err(|error| error.to_string())?;
 
         match response {
-            Response::PageRendered { width, height, pixels } => {
+            Response::PageRendered { width, height, pixels, .. } => {
                 let pixels = bgra_to_rgba(pixels);
 
                 if let Ok(mut cache) = self.cache.lock() {

@@ -18,7 +18,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use crate::framing::{FrameError, read_frame, write_frame};
+use crate::framing::{FrameError, read_blob, read_frame, write_frame};
 use crate::protocol::{Request, ResourceLimits, Response, SandboxStatus, WorkerError};
 
 /// Default deadline for a single request.
@@ -85,7 +85,24 @@ impl Worker {
         let reader = std::thread::spawn(move || {
             let mut stdout = BufReader::new(stdout);
             loop {
-                let frame = read_frame::<_, Response>(&mut stdout);
+                let mut frame = read_frame::<_, Response>(&mut stdout);
+
+                // A rendered page is announced by a message and delivered by
+                // the blob frame that follows. Pairing them here keeps the
+                // split invisible to callers.
+                if let Ok(Response::PageRendered { byte_len, pixels, .. }) = &mut frame {
+                    match read_blob(&mut stdout) {
+                        Ok(bytes) if bytes.len() == *byte_len => *pixels = bytes,
+                        Ok(bytes) => {
+                            frame = Err(FrameError::Malformed(format!(
+                                "pixel blob was {} bytes, message declared {byte_len}",
+                                bytes.len()
+                            )));
+                        }
+                        Err(error) => frame = Err(error),
+                    }
+                }
+
                 let closed = frame.is_err();
                 if sender.send(frame).is_err() || closed {
                     break;

@@ -299,32 +299,53 @@ export function updateVisiblePages(): void {
     else if (slot.hasPixels) releaseSlotPixels(slot);
   }
 
-  if (visible.first !== state.page) {
-    state.page = visible.first;
+  if (visible.current !== state.page) {
+    state.page = visible.current;
     notify("page");
   }
 }
 
-function visiblePageRange(): { first: number; last: number } {
-  const top = viewport.scrollTop;
-  const bottom = top + viewport.clientHeight;
+/**
+ * Which pages are on screen, and which one the user is actually reading.
+ *
+ * Measured with viewport-relative rectangles rather than `offsetTop`.
+ * `offsetTop` is relative to whichever ancestor happens to be an offset
+ * parent, and adding a wrapper element silently changes that — which is
+ * exactly what happened when the sidebar was introduced, leaving the page
+ * indicator wrong in scroll mode.
+ */
+function visiblePageRange(): { first: number; last: number; current: number } {
+  const bounds = viewport.getBoundingClientRect();
 
   let first = 0;
   let last = 0;
   let found = false;
 
+  // The reported page is the one covering most of the viewport, not merely the
+  // topmost visible one. Scrolling so a page's last sliver is still on screen
+  // should not keep claiming to be on that page.
+  let current = 0;
+  let bestCoverage = -1;
+
   for (const [page, slot] of slots) {
-    const slotTop = slot.root.offsetTop;
-    if (slotTop + slot.root.offsetHeight >= top && slotTop <= bottom) {
-      if (!found) {
-        first = page;
-        found = true;
-      }
-      last = page;
+    const rect = slot.root.getBoundingClientRect();
+    if (rect.bottom < bounds.top || rect.top > bounds.bottom) continue;
+
+    if (!found) {
+      first = page;
+      found = true;
+    }
+    last = page;
+
+    const coverage =
+      Math.min(rect.bottom, bounds.bottom) - Math.max(rect.top, bounds.top);
+    if (coverage > bestCoverage) {
+      bestCoverage = coverage;
+      current = page;
     }
   }
 
-  return found ? { first, last } : { first: 0, last: 0 };
+  return found ? { first, last, current } : { first: 0, last: 0, current: 0 };
 }
 
 // --- overlay ---------------------------------------------------------------
@@ -412,7 +433,12 @@ export function invalidate(rebuild: boolean): void {
 export function scrollToPage(page: number): void {
   const slot = slots.get(page);
   if (slot === undefined) return;
-  viewport.scrollTo({ top: slot.root.offsetTop - 16, behavior: "auto" });
+
+  // Rectangle-based for the same reason as visiblePageRange: an offset parent
+  // is not something to rely on staying put across a layout change.
+  const slotTop = slot.root.getBoundingClientRect().top;
+  const viewportTop = viewport.getBoundingClientRect().top;
+  viewport.scrollTo({ top: viewport.scrollTop + (slotTop - viewportTop) - 16, behavior: "auto" });
 }
 
 export function slotPages(): number[] {

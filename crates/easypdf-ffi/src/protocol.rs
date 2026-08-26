@@ -178,12 +178,20 @@ pub enum Response {
     },
 
     /// A rasterized page.
+    ///
+    /// The pixels travel as a **separate binary frame**, not inside this JSON
+    /// message. Serialising a `Vec<u8>` as JSON turns each byte into decimal
+    /// digits and a comma — a 3.6x expansion that pushed a single high-zoom
+    /// page past the frame limit and killed the worker.
     PageRendered {
         /// Width in pixels.
         width: u32,
         /// Height in pixels.
         height: u32,
-        /// BGRA pixel data.
+        /// How many bytes of pixel data follow in the next frame.
+        byte_len: usize,
+        /// BGRA pixel data, filled in from the following blob frame.
+        #[serde(skip)]
         pixels: Vec<u8>,
     },
 
@@ -296,10 +304,13 @@ impl Response {
     #[must_use]
     pub fn is_self_consistent(&self) -> bool {
         match self {
-            Self::PageRendered { width, height, pixels } => {
+            Self::PageRendered { width, height, byte_len, pixels } => {
                 let expected =
                     (*width as usize).checked_mul(*height as usize).and_then(|n| n.checked_mul(4));
-                expected == Some(pixels.len())
+                // Both the declared length and the attached buffer must agree
+                // with the dimensions: a mismatch is how a hostile worker
+                // induces an out-of-bounds read in the consumer.
+                expected == Some(*byte_len) && expected == Some(pixels.len())
             }
             _ => true,
         }
@@ -312,7 +323,8 @@ mod tests {
 
     #[test]
     fn well_formed_render_response_is_accepted() {
-        let response = Response::PageRendered { width: 2, height: 3, pixels: vec![0; 24] };
+        let response =
+            Response::PageRendered { width: 2, height: 3, byte_len: 24, pixels: vec![0; 24] };
         assert!(response.is_self_consistent());
     }
 
@@ -320,14 +332,19 @@ mod tests {
     fn pixel_buffer_shorter_than_declared_size_is_rejected() {
         // A hostile worker under-reporting its buffer is how the host gets an
         // out-of-bounds read.
-        let response = Response::PageRendered { width: 100, height: 100, pixels: vec![0; 10] };
+        let response =
+            Response::PageRendered { width: 100, height: 100, byte_len: 10, pixels: vec![0; 10] };
         assert!(!response.is_self_consistent());
     }
 
     #[test]
     fn dimension_overflow_is_rejected_rather_than_wrapping() {
-        let response =
-            Response::PageRendered { width: u32::MAX, height: u32::MAX, pixels: vec![0; 4] };
+        let response = Response::PageRendered {
+            width: u32::MAX,
+            height: u32::MAX,
+            byte_len: 4,
+            pixels: vec![0; 4],
+        };
         assert!(!response.is_self_consistent());
     }
 
