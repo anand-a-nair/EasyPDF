@@ -12,6 +12,7 @@
 #   frontend types  TypeScript correctness
 #   dependencies    licences and advisories
 #   bundle          that the shipped package is self-contained
+#   budgets         startup time and idle memory, which need a running app
 #
 # The frontend's *behaviour* is exercised by the browser harness, which needs a
 # browser and is not run from here — see apps/desktop/harness/README.md.
@@ -31,6 +32,12 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 step "rust tests (unit, render, worker boundary, session)"
 cargo test --workspace
+
+# Budget assertions are release-only: a debug build's timings say nothing about
+# the product, and asserting on them makes the suite fail for reasons unrelated
+# to any change.
+step "performance budgets (release)"
+cargo test --release -p easypdf-session --test budget -- --test-threads=1
 
 step "contract: harness stubs versus real payloads"
 node scripts/check-contracts.mjs
@@ -54,5 +61,8 @@ step "bundle"
 npm --prefix apps/desktop run tauri build -- --bundles app
 bash scripts/verify-bundle.sh
 bash scripts/check-size.sh
+
+step "startup and memory budgets"
+python3 scripts/measure-startup.py
 
 printf '\n\033[1mall checks passed\033[0m\n'

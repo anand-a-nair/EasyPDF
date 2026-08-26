@@ -20,6 +20,50 @@ something else gets removed to pay for it.
 
 Measured on the stated baseline machine, not a developer workstation.
 
+## Measured, 2026-08-25
+
+First full measurement against the budget. Release build, macOS on Apple
+Silicon — **not** the baseline machine below, so these are optimistic; the
+point is that the budget is now measured rather than aspirational.
+
+| Metric | Budget | Measured | |
+|---|---|---|---|
+| Installer size | ≤ 15 MB | **4.77 MB** | ✅ |
+| Cold start → window | ≤ 400 ms | **167–207 ms** | ✅ |
+| Idle RSS, no document | ≤ 150 MB | **95–103 MB** | ✅ |
+| 500-page open → first page | ≤ 1 s | **16.6 ms** | ✅ |
+| Cached page navigation | ≤ 16 ms | **2.5 µs** | ✅ |
+| Zoom step re-render | ≤ 100 ms | **4.3 ms** | ✅ |
+| Cold page render, average | ≤ 16 ms | **968 µs** | ✅ |
+| Search across 500 pages | — | **6.5 ms** | ✅ |
+
+Two results worth keeping:
+
+**Opening 500 pages (2 ms) is faster than opening one page (9 ms).** The
+single-page case pays PDFium's one-time library warm-up. This is direct
+evidence for the architectural claim in
+[02-architecture.md](02-architecture.md) that opening reads the cross-reference
+table rather than walking the page tree — and
+`opening_does_not_scale_with_page_count` now guards it.
+
+**Idle memory is ~100 MB before a document is even open**, two thirds of the
+budget. Almost all of it is the system WebView. It is the figure most likely to
+push past budget later, and the one least under our control — worth watching
+rather than assuming the headroom is real.
+
+**Search needs no index.** 6.5 ms across 500 pages, against a 250 ms input
+debounce. A text index was on the roadmap as a performance fix; the measurement
+says it would be solving a problem that does not exist. Revisit if a large
+scanned document says otherwise.
+
+## What is still unmeasured
+
+- The **400 MB scanned book** case. The corpus has no such document; generating
+  a realistic one is not the same as having one.
+- Anything on the **baseline machine** below. Every figure here is from a fast
+  laptop.
+- Linux and Windows, which have never been built.
+
 ## Baseline machine
 
 Budgets are validated against modest hardware, because that's where the

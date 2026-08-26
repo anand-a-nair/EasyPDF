@@ -45,6 +45,10 @@ jobs:
       - name: Contract — harness stubs versus real payloads
         run: node scripts/check-contracts.mjs
 
+      # Release-only: debug timings say nothing about the product.
+      - name: Performance budgets
+        run: cargo test --release -p easypdf-session --test budget -- --test-threads=1
+
   frontend:
     name: Frontend typecheck
     runs-on: ubuntu-latest
@@ -146,3 +150,10 @@ jobs:
       - name: Verify the bundle is self-contained
         if: matrix.os == 'macos-latest'
         run: bash scripts/verify-bundle.sh
+
+      # Startup and idle memory need a running app, so they cannot be covered
+      # by the test suite. A CI runner is slower than a laptop, which is closer
+      # to the baseline machine the budget is written against.
+      - name: Startup and memory budgets
+        if: matrix.os == 'macos-latest'
+        run: python3 scripts/measure-startup.py

@@ -194,6 +194,10 @@ def main() -> None:
     (corpus / "many-pages.pdf").write_bytes(
         build_multipage([f"Page {n + 1} of 200" for n in range(200)])
     )
+    # The performance budget names 500 pages as the scaling case.
+    (corpus / "five-hundred-pages.pdf").write_bytes(
+        build_multipage([f"Page {n + 1} of 500" for n in range(500)])
+    )
     # Encrypted with the user password "secret". Byte-stable because the
     # document ID is fixed rather than random.
     (corpus / "encrypted.pdf").write_bytes(

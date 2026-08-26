@@ -216,6 +216,12 @@ fn core_status() -> CoreStatus {
 // outcome. The lint exists to keep unwraps out of parsing paths, not here.
 #[allow(clippy::expect_used)]
 fn main() {
+    // Measured from the top of main to the window being ready. Misses process
+    // exec and dynamic linking, which is why the measuring script also records
+    // wall-clock time from launch — the two together bound the real figure.
+    let started = std::time::Instant::now();
+    let measuring = std::env::var_os("EASYPDF_MEASURE_STARTUP").is_some();
+
     let worker = worker_path().unwrap_or_else(|| PathBuf::from("easypdf-worker"));
 
     tauri::Builder::default()
@@ -234,6 +240,13 @@ fn main() {
             close_document,
             document_info
         ])
+        .setup(move |_app| {
+            if measuring {
+                // stderr so it cannot be confused with application output.
+                eprintln!("EASYPDF_STARTUP_MS={:.1}", started.elapsed().as_secs_f64() * 1000.0);
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("failed to start the EasyPDF window");
 }
